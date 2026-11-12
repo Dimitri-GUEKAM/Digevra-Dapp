@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Angular application
+      - name: Build DIGEVRA
         run: npx ng build --configuration production --base-href /Digevra-Dapp/
 
       - name: Configure GitHub Pages
