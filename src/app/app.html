@@ -1,0 +1,808 @@
+<div class="app">
+
+  <!-- HEADER -->
+  <header class="topbar">
+
+    <div class="brand">
+
+      <div class="logo">
+        D
+      </div>
+
+      <div>
+        <div class="brand-title">
+          DIGEVRA <span>DApp</span>
+        </div>
+
+        <div class="brand-subtitle">
+          Portefeuille & Transactions sur le réseau DIGEVRA
+        </div>
+      </div>
+
+    </div>
+
+    <nav class="nav-tabs">
+
+      <button
+        [class.active]="vueActive === 'wallet'"
+        (click)="ouvrirWalletView()"
+      >
+        ▣ Wallet
+      </button>
+
+      <button
+        [class.active]="vueActive === 'activite'"
+        (click)="ouvrirActivite()"
+      >
+        ◷ Activité
+      </button>
+
+      <button
+        [class.active]="vueActive === 'parametres'"
+        (click)="ouvrirParametres()"
+      >
+        ⚙ Paramètres
+      </button>
+
+    </nav>
+
+    <div class="network-pill">
+
+      <span
+        class="status-dot"
+        [class.offline]="!reseauEnLigne"
+      ></span>
+
+      <div>
+        <strong>
+          Réseau DIGEVRA
+        </strong>
+
+        <small>
+          Chain ID: {{ chainId }}
+        </small>
+      </div>
+
+    </div>
+
+  </header>
+
+  <!-- =========================
+       WALLET VIEW
+       ========================= -->
+
+  <main
+    *ngIf="vueActive === 'wallet'"
+    class="content"
+  >
+
+    <!-- HERO -->
+    <section class="hero">
+
+      <div>
+        <h1>
+          Votre portefeuille DIGEVRA
+        </h1>
+
+        <p>
+          Envoyez, recevez et suivez vos DGV
+          en toute simplicité.
+        </p>
+      </div>
+
+      <div class="coin-area">
+
+        <div class="coin coin-small"></div>
+
+        <div class="coin coin-main">
+          DGV
+        </div>
+
+        <div class="coin coin-small"></div>
+
+      </div>
+
+    </section>
+
+    <div class="dashboard-grid">
+
+      <!-- WALLET -->
+      <section class="card wallet-card">
+
+        <div class="card-header">
+
+          <div class="card-title">
+            <span class="icon">
+              ◫
+            </span>
+
+            Mon Wallet
+          </div>
+
+          <span
+            class="connected-badge"
+            [class.disconnected]="!walletConnecte"
+          >
+            ●
+            {{
+              walletConnecte
+                ? 'Connecté'
+                : 'Non connecté'
+            }}
+          </span>
+
+        </div>
+
+        <div
+          *ngIf="walletConnecte"
+          class="wallet-body"
+        >
+
+          <div class="wallet-icon">
+            ▣
+          </div>
+
+          <div class="wallet-info">
+
+            <span class="label">
+              Adresse
+            </span>
+
+            <div class="address-row">
+
+              <strong>
+                {{ adresseWallet }}
+              </strong>
+
+              <button
+                class="copy-button"
+                (click)="copierAdresse()"
+              >
+                ⧉
+              </button>
+
+            </div>
+
+            <span class="label balance-label">
+              Solde disponible
+            </span>
+
+            <div class="balance">
+              {{
+                soldeDgv
+                  | number:'1.2-6'
+              }}
+              DGV
+            </div>
+
+          </div>
+
+        </div>
+
+        <div
+          *ngIf="!walletConnecte"
+          class="wallet-empty"
+        >
+
+          <h3>
+            Aucun wallet connecté
+          </h3>
+
+          <p>
+            Ouvrez DIGEVRA Wallet pour
+            connecter votre portefeuille.
+          </p>
+
+          <button
+            class="primary-button"
+            (click)="ouvrirWallet()"
+          >
+            Connecter DIGEVRA Wallet
+          </button>
+
+        </div>
+
+      </section>
+
+      <!-- TRANSFERT -->
+      <section class="card transfer-card">
+
+        <div class="card-title">
+          <span class="icon">
+            ⇄
+          </span>
+
+          <div>
+            Transfert
+
+            <small>
+              Envoyez ou recevez des DGV
+            </small>
+          </div>
+        </div>
+
+        <div class="transfer-actions">
+
+          <button
+            class="transfer-button send"
+            (click)="ouvrirEnvoi()"
+          >
+            <span class="big-icon">
+              ➤
+            </span>
+
+            <strong>
+              Envoyer
+            </strong>
+
+            <small>
+              Transférer des DGV
+            </small>
+          </button>
+
+          <button
+            class="transfer-button receive"
+            (click)="ouvrirReception()"
+          >
+            <span class="big-icon">
+              ⌗
+            </span>
+
+            <strong>
+              Recevoir
+            </strong>
+
+            <small>
+              Obtenir mon adresse
+              et QR Code
+            </small>
+          </button>
+
+        </div>
+
+      </section>
+
+      <!-- DERNIERES TRANSACTIONS -->
+      <section class="card transactions-card">
+
+        <div class="card-header">
+
+          <div class="card-title">
+            〽 Dernières transactions
+          </div>
+
+          <button
+            class="view-all"
+            (click)="ouvrirActivite()"
+          >
+            Voir tout →
+          </button>
+
+        </div>
+
+        <div
+          *ngIf="transactions.length === 0"
+          class="empty-state"
+        >
+          Aucune transaction disponible.
+        </div>
+
+        <div
+          *ngFor="
+            let tx of transactions | slice:0:3
+          "
+          class="transaction-row"
+        >
+
+          <div
+            class="transaction-icon"
+            [class.sent]="estEnvoyee(tx)"
+          >
+            {{
+              estEnvoyee(tx)
+                ? '↑'
+                : '↓'
+            }}
+          </div>
+
+          <div class="transaction-main">
+
+            <strong>
+              {{
+                estEnvoyee(tx)
+                  ? 'Envoi'
+                  : 'Réception'
+              }}
+            </strong>
+
+            <span>
+              {{
+                estEnvoyee(tx)
+                  ? 'Vers'
+                  : 'De'
+              }}
+
+              {{
+                raccourcirAdresse(
+                  estEnvoyee(tx)
+                    ? (
+                        tx.to ??
+                        tx.toAddress
+                      )
+                    : (
+                        tx.from ??
+                        tx.fromAddress
+                      )
+                )
+              }}
+            </span>
+
+          </div>
+
+          <div
+            class="transaction-value"
+            [class.received]="!estEnvoyee(tx)"
+          >
+            {{
+              estEnvoyee(tx)
+                ? '-'
+                : '+'
+            }}
+
+            {{
+              obtenirMontant(tx)
+                | number:'1.2-6'
+            }}
+
+            DGV
+          </div>
+
+          <div class="transaction-date">
+
+            <span
+              *ngIf="obtenirDate(tx) as date"
+            >
+              {{
+                date
+                  | date:'dd/MM HH:mm'
+              }}
+            </span>
+
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- NETWORK -->
+      <section class="card network-card">
+
+        <div class="card-header">
+
+          <div class="card-title">
+            ◈ Réseau DIGEVRA
+          </div>
+
+          <span
+            class="online-badge"
+            [class.offline]="!reseauEnLigne"
+          >
+            ●
+            {{
+              reseauEnLigne
+                ? 'En ligne'
+                : 'Hors ligne'
+            }}
+          </span>
+
+        </div>
+
+        <div class="network-row">
+
+          <span>
+            Consensus
+          </span>
+
+          <strong>
+            {{ consensus }}
+          </strong>
+
+        </div>
+
+        <div class="network-row">
+
+          <span>
+            Chain ID
+          </span>
+
+          <strong>
+            {{ chainId }}
+          </strong>
+
+        </div>
+
+        <div class="network-row">
+
+          <span>
+            Dernier bloc
+          </span>
+
+          <button
+            class="network-link"
+            (click)="ouvrirBloc(dernierBloc)"
+          >
+            {{ dernierBloc }}
+          </button>
+
+        </div>
+
+        <div class="network-row">
+
+          <span>
+            Transactions
+          </span>
+
+          <strong>
+            {{ totalTransactions }}
+          </strong>
+
+        </div>
+
+        <button
+          class="explorer-button"
+          (click)="ouvrirExplorer()"
+        >
+          Ouvrir DIGEVRA Explorer
+        </button>
+
+      </section>
+
+    </div>
+
+  </main>
+
+  <!-- =========================
+       ACTIVITE
+       ========================= -->
+
+  <main
+    *ngIf="vueActive === 'activite'"
+    class="content"
+  >
+
+    <section class="page-title">
+
+      <div>
+        <h1>
+          Activité
+        </h1>
+
+        <p>
+          Historique complet de votre wallet.
+        </p>
+      </div>
+
+    </section>
+
+    <section class="card activity-full">
+
+      <div
+        *ngIf="!walletConnecte"
+        class="empty-state"
+      >
+        Connectez d'abord un wallet.
+      </div>
+
+      <div
+        *ngFor="let tx of transactions"
+        class="activity-row"
+      >
+
+        <div
+          class="transaction-icon"
+          [class.sent]="estEnvoyee(tx)"
+        >
+          {{
+            estEnvoyee(tx)
+              ? '↑'
+              : '↓'
+          }}
+        </div>
+
+        <div class="activity-main">
+
+          <strong>
+            {{
+              estEnvoyee(tx)
+                ? 'Envoi'
+                : 'Réception'
+            }}
+          </strong>
+
+          <span>
+            {{
+              raccourcirAdresse(
+                estEnvoyee(tx)
+                  ? (
+                      tx.to ??
+                      tx.toAddress
+                    )
+                  : (
+                      tx.from ??
+                      tx.fromAddress
+                    )
+              )
+            }}
+          </span>
+
+        </div>
+
+        <div>
+          {{
+            obtenirMontant(tx)
+              | number:'1.2-6'
+          }}
+          DGV
+        </div>
+
+        <button
+          class="hash-button"
+          (click)="ouvrirTransaction(
+            obtenirHash(tx)
+          )"
+        >
+          Voir transaction
+        </button>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <div
+    *ngIf="panneauTransfert === 'recevoir'"
+    class="transfer-modal"
+  >
+    <section
+      class="transfer-modal-card"
+      aria-labelledby="receive-title"
+    >
+      <button
+        type="button"
+        class="modal-close"
+        aria-label="Fermer"
+        (click)="fermerTransfert()"
+      >
+        ×
+      </button>
+
+      <h2 id="receive-title">Recevoir des DGV</h2>
+      <p>Scannez le QR code ou copiez votre adresse DIGEVRA.</p>
+
+      <p
+        *ngIf="messageTransaction"
+        class="transaction-message"
+        aria-live="polite"
+      >
+        {{ messageTransaction }}
+      </p>
+
+      <img
+        *ngIf="qrCodeDataUrl"
+        [src]="qrCodeDataUrl"
+        class="receive-qr"
+        alt="QR code DIGEVRA"
+      />
+
+      <div class="receive-address">
+        <code>{{ adresseWallet }}</code>
+        <button
+          type="button"
+          (click)="copierAdresse()"
+        >
+          Copier
+        </button>
+      </div>
+
+      <p
+        *ngIf="messageCopie"
+        class="transaction-message"
+        aria-live="polite"
+      >
+        {{ messageCopie }}
+      </p>
+
+      <span class="network-label">Réseau DIGEVRA · DGV</span>
+    </section>
+  </div>
+
+  <div
+    *ngIf="panneauTransfert === 'envoyer'"
+    class="transfer-modal"
+  >
+    <section
+      class="transfer-modal-card"
+      aria-labelledby="send-title"
+    >
+      <button
+        type="button"
+        class="modal-close"
+        aria-label="Fermer"
+        [disabled]="transactionEnCours"
+        (click)="fermerTransfert()"
+      >
+        ×
+      </button>
+
+      <h2 id="send-title">Envoyer des DGV</h2>
+
+      <label for="dapp-recipient">Adresse destinataire</label>
+      <input
+        id="dapp-recipient"
+        type="text"
+        [(ngModel)]="adresseDestinataire"
+        placeholder="0x..."
+        autocomplete="off"
+        [disabled]="transactionEnCours"
+      />
+
+      <label for="dapp-amount">Montant</label>
+      <div class="amount-input">
+        <input
+          id="dapp-amount"
+          type="number"
+          [(ngModel)]="montantEnvoi"
+          min="0"
+          step="0.000001"
+          [disabled]="transactionEnCours"
+        />
+        <strong>DGV</strong>
+      </div>
+
+      <p class="available-balance">
+        Solde du Wallet connecté : {{ soldeDgv | number:'1.2-6' }} DGV
+      </p>
+      <p class="available-balance">
+        L’envoi utilise le Smart Wallet. Le compte de session doit aussi
+        avoir du DGV pour payer le gas.
+      </p>
+      <button
+        *ngIf="sessionWallet && !sessionAutorisee && !demandeAutorisationSessionId"
+        type="button"
+        class="receive-button"
+        (click)="demanderAutorisationSession()"
+      >
+        Réessayer l’autorisation de session
+      </button>
+
+      <p
+        *ngIf="messageTransaction"
+        class="transaction-message"
+        aria-live="polite"
+      >
+        {{ messageTransaction }}
+      </p>
+
+      <button
+        type="button"
+        class="confirm-transfer"
+        [disabled]="transactionEnCours"
+        (click)="preparerEnvoi()"
+      >
+        {{ transactionEnCours ? 'Envoi en cours...' : 'Envoyer directement' }}
+      </button>
+
+      <button
+        *ngIf="dernierHashTransaction"
+        type="button"
+        class="tx-hash-link"
+        (click)="ouvrirTransaction(dernierHashTransaction)"
+      >
+        Voir la transaction dans DIGEVRA Explorer
+      </button>
+    </section>
+  </div>
+
+  <!-- =========================
+       PARAMETRES
+       ========================= -->
+
+  <main
+    *ngIf="vueActive === 'parametres'"
+    class="content"
+  >
+
+    <section class="page-title">
+
+      <div>
+        <h1>
+          Paramètres
+        </h1>
+
+        <p>
+          Configuration de DIGEVRA DApp.
+        </p>
+      </div>
+
+    </section>
+
+    <div class="settings-grid">
+
+      <section class="card">
+
+        <h3>
+          Réseau
+        </h3>
+
+        <div class="settings-row">
+          <span>Nom</span>
+          <strong>DIGEVRA</strong>
+        </div>
+
+        <div class="settings-row">
+          <span>Chain ID</span>
+          <strong>{{ chainId }}</strong>
+        </div>
+
+        <div class="settings-row">
+          <span>Consensus</span>
+          <strong>{{ consensus }}</strong>
+        </div>
+
+        <div class="settings-row">
+          <span>Backend</span>
+          <code>{{ backendUrl }}</code>
+        </div>
+
+        <div class="settings-row">
+          <span>Explorer</span>
+          <code>{{ explorerUrl }}</code>
+        </div>
+
+      </section>
+
+      <section class="card">
+
+        <h3>
+          Wallet
+        </h3>
+
+        <div *ngIf="walletConnecte">
+
+          <p class="settings-address">
+            {{ adresseWallet }}
+          </p>
+
+          <button
+            class="danger-button"
+            [disabled]="transactionEnCours"
+            (click)="deconnecterWallet()"
+          >
+            Déconnecter
+          </button>
+
+        </div>
+
+        <div *ngIf="!walletConnecte">
+
+          <p>
+            Aucun wallet connecté.
+          </p>
+
+          <button
+            class="primary-button"
+            (click)="ouvrirWallet()"
+          >
+            Ouvrir DIGEVRA Wallet
+          </button>
+
+        </div>
+
+      </section>
+
+    </div>
+
+  </main>
+
+</div>

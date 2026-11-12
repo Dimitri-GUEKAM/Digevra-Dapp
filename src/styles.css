@@ -1,0 +1,21 @@
+/* You can add global styles to this file, and also import other style files */
+
+.transfer-modal{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,6,18,.78);backdrop-filter:blur(12px)}
+.transfer-modal-card{position:relative;width:min(500px,100%);max-height:90vh;overflow:auto;padding:30px;border:1px solid rgba(44,149,255,.45);border-radius:24px;background:linear-gradient(145deg,#0d1d3a,#071326);box-shadow:0 30px 100px rgba(0,0,0,.5)}
+.transfer-modal-card h2{margin-top:0;padding-right:40px;font-size:28px}
+.modal-close{position:absolute;top:15px;right:18px;width:38px;height:38px;border:0;border-radius:50%;background:#172743;color:white;font-size:24px}
+.modal-close:disabled{cursor:not-allowed;opacity:.5}
+.transfer-modal-card label{display:block;margin:20px 0 7px;color:#aebbd2}
+.transfer-modal-card input{width:100%;padding:14px;border:1px solid #294a7a;border-radius:12px;background:#071326;color:white}
+.amount-input{display:flex;align-items:center;gap:12px}
+.amount-input strong{padding:13px 16px;border-radius:11px;background:#142744}
+.available-balance{color:#91a4c4}
+.confirm-transfer{width:100%;margin-top:15px;padding:14px;border:0;border-radius:13px;background:linear-gradient(110deg,#168cff,#623cf4);color:white;font-weight:800}
+.confirm-transfer:disabled{cursor:wait;opacity:.6}
+.transaction-message{overflow-wrap:anywhere;padding:10px 12px;border-radius:10px;background:rgba(21,117,220,.12);color:#8fc7ff}
+.receive-qr{display:block;width:240px;height:240px;margin:25px auto;padding:12px;border-radius:18px;background:white}
+.receive-address{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;background:#071326}
+.receive-address code{flex:1;overflow-wrap:anywhere;color:#9bc8ff}
+.receive-address button{flex-shrink:0;border:0;padding:10px 14px;border-radius:9px;background:#1d68d8;color:white}
+.network-label{display:block;margin-top:17px;text-align:center;color:#8499bb}
+.tx-hash-link{display:block;margin:14px auto 0;border:0;background:transparent;color:#8fc7ff;text-decoration:underline}
