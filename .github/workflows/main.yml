@@ -3,7 +3,7 @@ name: Deploy DIGEVRA DApp
 on:
   push:
     branches:
-      - main
+      - develop
   workflow_dispatch:
 
 permissions:
