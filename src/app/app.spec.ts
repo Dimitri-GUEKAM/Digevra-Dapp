@@ -21,7 +21,8 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Votre portefeuille DIGEVRA');
+    expect(compiled.querySelector('h1')?.textContent)
+      .toContain('DIGEVRA Wallet');
   });
 
   it('accepts a public address only from the opened Wallet window', () => {
@@ -230,6 +231,9 @@ describe('App', () => {
 
     expect(app.adresseWallet).toBe(address);
     expect(app.walletConnecte).toBe(false);
+    expect(app.sessionAutorisee).toBe(false);
+    expect(app.sessionWallet).toBeNull();
+    expect(app.sessionAddress).toBe('');
     expect(chargerWallet).toHaveBeenCalledOnce();
     fixture.destroy();
     localStorage.removeItem('digevra_connected_address');

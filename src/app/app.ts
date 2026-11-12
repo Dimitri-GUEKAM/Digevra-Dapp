@@ -128,16 +128,19 @@ export class App implements OnInit, OnDestroy {
 
     this.vaultExists = !!localStorage.getItem(this.vaultKey);
     this.authMode = this.vaultExists ? 'unlock' : 'welcome';
-    const adresseSauvegardee = null; // Ne jamais authentifier via une adresse mémorisée.
-
+    const adresseSauvegardee = localStorage.getItem(
+      'digevra_connected_address'
+    );
 
     if (
       adresseSauvegardee &&
-      /^0x[a-fA-F0-9]{40}$/.test(
-        adresseSauvegardee
-      )
+      /^0x[a-fA-F0-9]{40}$/.test(adresseSauvegardee)
     ) {
       this.adresseWallet = adresseSauvegardee;
+      this.walletConnecte = false;
+      this.sessionAutorisee = false;
+      this.sessionWallet = null;
+      this.sessionAddress = '';
       this.chargerWallet();
     }
   }
