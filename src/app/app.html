@@ -6,7 +6,7 @@
     <div *ngIf="authMode === 'welcome'">
       <button class="auth-primary" (click)="choisirAuth('create')">Créer un portefeuille</button>
       <button class="auth-secondary" (click)="choisirAuth('import')">Importer avec ma phrase</button>
-      <button *ngIf="vaultExists" class="auth-secondary" (click)="choisirAuth('unlock')">Déverrouiller</button>
+      <button *ngIf="vaultExists" class="auth-secondary" (click)="choisirAuth('unlock')">Se connecter à mon portefeuille</button>
     </div>
     <div *ngIf="authMode === 'create' || authMode === 'import'">
       <p *ngIf="authMode === 'import'">Saisissez votre phrase uniquement dans cette application de confiance, jamais dans un formulaire envoyé par message.</p>
@@ -35,7 +35,7 @@
 <div *ngIf="walletConnecte">
 <div class="app">
 
-  <button class="auth-lock" (click)="verrouiller()">🔒 Verrouiller le portefeuille</button>
+  <button class="auth-lock" (click)="verrouiller()" *ngIf="vaultExists" aria-label="Verrouiller le portefeuille">🔒 Verrouiller</button>
   <!-- HEADER -->
   <header class="topbar">
 
@@ -57,7 +57,7 @@
 
     </div>
 
-    <nav class="nav-tabs">
+    <nav class="nav-tabs" aria-label="Navigation principale">
 
       <button
         [class.active]="vueActive === 'wallet'"
@@ -82,7 +82,7 @@
 
     </nav>
 
-    <div class="network-pill">
+    <div class="network-pill" role="status">
 
       <span
         class="status-dot"

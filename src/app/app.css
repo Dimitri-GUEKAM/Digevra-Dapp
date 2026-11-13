@@ -954,3 +954,100 @@ button {
 .auth-card h1{text-align:center;font-size:30px;margin:15px 0 8px}.auth-card p{color:#b2aabd;line-height:1.5}.auth-mark{margin:auto;width:76px;height:76px;border-radius:22px;background:linear-gradient(135deg,#8b5cf6,#12d7a5);display:grid;place-items:center;font-weight:900;color:#090914;font-size:23px}
 .auth-card input:not([type=checkbox]),.auth-card textarea{display:block;width:100%;box-sizing:border-box;background:#090911;color:white;border:1px solid #504363;border-radius:13px;padding:15px;margin:12px 0;font:inherit}.auth-card textarea{min-height:95px}
 .auth-primary,.auth-secondary{width:100%;padding:15px;border-radius:13px;margin:9px 0;font-size:16px;font-weight:700;cursor:pointer}.auth-primary{background:#a776fa;color:#140c23;border:0}.auth-secondary{background:transparent;color:#c6a5ff;border:1px solid #73519b}.auth-primary:disabled{opacity:.5;cursor:not-allowed}.auth-back{background:none;color:#c6a5ff;border:0;margin-top:12px;cursor:pointer}.auth-error{color:#ff8c9b!important}.recovery-box{border:1px solid #9d6ad4;border-radius:12px;padding:14px;margin-top:20px}.recovery-words{padding:12px;background:#080711;word-spacing:8px;line-height:2;border-radius:8px}.auth-lock{position:fixed;right:12px;bottom:12px;z-index:9999;background:#6d42a4;color:white;border:0;border-radius:10px;padding:11px;cursor:pointer}
+
+
+/* DIGEVRA V2 — responsive progressive enhancement (sans changer la logique métier) */
+:host { overflow-x: clip; }
+.app { width: 100%; }
+button { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 2px solid #71c7ff; outline-offset: 3px;
+}
+.card, .hero, .dashboard-grid > *, .settings-grid > * { min-width: 0; }
+.address-row strong, .settings-row code { overflow-wrap: anywhere; }
+.auth-card { max-height: none; }
+.auth-card .recovery-words { overflow-wrap: anywhere; user-select: text; }
+.auth-card textarea { resize: vertical; }
+.auth-card input, .auth-card textarea { font-size: 16px; }
+.transfer-modal { position: fixed; inset: 0; z-index: 1100; display: grid;
+  place-items: center; padding: 20px; background: rgba(1, 7, 20, .82);
+  overflow-y: auto; backdrop-filter: blur(8px); }
+.transfer-modal-card { position: relative; width: min(100%, 520px); max-height: calc(100dvh - 40px);
+  overflow-y: auto; padding: 30px; border-radius: 24px; color: #f6f8ff;
+  background: #0d1932; border: 1px solid rgba(100, 145, 240, .4); }
+.transfer-modal-card input { max-width: 100%; min-width: 0; }
+.transfer-modal-card .receive-address { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.transfer-modal-card .receive-address code { overflow-wrap: anywhere; flex: 1 1 220px; }
+.transfer-modal-card .receive-qr { display: block; max-width: min(100%, 240px); height: auto; margin: 18px auto; }
+.modal-close { position: absolute; right: 14px; top: 10px; border: 0; background: transparent;
+  color: #fff; font-size: 28px; }
+@media (min-width: 1101px) {
+  .app { padding: 28px clamp(24px, 3vw, 56px) 56px; }
+  .topbar { grid-template-columns: minmax(250px, 1fr) auto minmax(190px, 1fr); }
+  .hero h1 { font-size: clamp(28px, 2.5vw, 40px); }
+  .wallet-body { gap: clamp(12px, 2vw, 28px); }
+  .wallet-icon { width: 112px; height: 112px; flex-basis: 112px; }
+  .balance { font-size: clamp(28px, 3vw, 45px); overflow-wrap: anywhere; }
+}
+@media (max-width: 750px) {
+  .app { padding: 14px 14px calc(100px + env(safe-area-inset-bottom)); }
+  .topbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .brand { flex: 1 1 190px; min-width: 0; }
+  .logo { width: 44px; height: 44px; font-size: 23px; flex-shrink: 0; }
+  .brand-title { font-size: 21px; }
+  .brand-subtitle { font-size: 11px; line-height: 1.3; }
+  .network-pill { margin-left: auto; padding: 8px 10px; font-size: 11px; }
+  .network-pill small { font-size: 10px; }
+  .nav-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+    width: 100%; padding: 9px 10px calc(9px + env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+    border-radius: 18px 18px 0 0; border: 1px solid #233c70;
+    background: rgba(7, 18, 43, .97); box-shadow: 0 -8px 28px #0008;
+    overflow: visible; }
+  .nav-tabs button { padding: 12px 4px; font-size: 12px; min-height: 46px; }
+  .hero { min-height: 0; padding: 22px 20px; border-radius: 20px; }
+  .hero h1 { font-size: clamp(22px, 6vw, 29px); }
+  .hero p { font-size: 14px; line-height: 1.5; }
+  .dashboard-grid { margin-top: 14px; gap: 14px; }
+  .card { border-radius: 18px; }
+  .wallet-card, .transfer-card, .transactions-card, .network-card,
+  .activity-full, .settings-grid .card { padding: 18px; }
+  .card-title { font-size: 19px; gap: 8px; }
+  .card-title small { font-size: 12px; }
+  .wallet-body { flex-direction: row; gap: 14px; align-items: flex-start; margin-top: 20px; }
+  .wallet-icon { width: 58px; height: 58px; flex: 0 0 58px; border-radius: 16px; font-size: 30px; }
+  .wallet-info { min-width: 0; }
+  .address-row { min-width: 0; }
+  .address-row strong { min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .copy-button { flex: 0 0 40px; }
+  .balance-label { margin-top: 17px; }
+  .balance { font-size: clamp(25px, 7vw, 36px); overflow-wrap: anywhere; }
+  .transfer-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 17px; }
+  .transfer-button { min-height: 110px; padding: 12px 6px; border-radius: 15px; }
+  .transfer-button strong { font-size: 17px; }
+  .transfer-button small { font-size: 11px; text-align: center; }
+  .big-icon { font-size: 28px; }
+  .transaction-row, .activity-row { grid-template-columns: 40px minmax(0, 1fr); gap: 6px 10px; }
+  .transaction-value, .transaction-date, .activity-row > div:nth-child(3),
+  .activity-row > button { grid-column: 2; text-align: left; font-size: 14px; }
+  .transaction-main { min-width: 0; overflow-wrap: anywhere; }
+  .settings-row { align-items: flex-start; flex-wrap: wrap; padding: 12px 0; }
+  .settings-row code { width: 100%; }
+  .auth-shell { padding: 14px; align-items: center; }
+  .auth-card { padding: 22px 18px; border-radius: 20px; }
+  .auth-card h1 { font-size: 25px; }
+  .auth-lock { bottom: calc(82px + env(safe-area-inset-bottom)); right: 14px; font-size: 12px; }
+  .transfer-modal { padding: 12px; }
+  .transfer-modal-card { padding: 24px 18px; max-height: calc(100dvh - 24px); }
+}
+@media (max-width: 360px) {
+  .app { padding-inline: 10px; }
+  .brand-subtitle { display: none; }
+  .network-pill { width: 100%; justify-content: center; }
+  .wallet-icon { display: none; }
+  .card-header { flex-wrap: wrap; }
+  .nav-tabs button { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
