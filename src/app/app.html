@@ -3,10 +3,31 @@
     <div class="auth-mark">DGV</div>
     <h1>DIGEVRA Wallet</h1>
     <p>Votre portefeuille, vos clés. Réseau de démonstration : connexion à vérifier.</p>
-    <div *ngIf="authMode === 'welcome'">
-      <button class="auth-primary" (click)="choisirAuth('create')">Créer un portefeuille</button>
-      <button class="auth-secondary" (click)="choisirAuth('import')">Importer avec ma phrase</button>
-      <button *ngIf="vaultExists" class="auth-secondary" (click)="choisirAuth('unlock')">Se connecter à mon portefeuille</button>
+    <div *ngIf="authMode === 'welcome'" class="auth-options">
+      <button
+        type="button"
+        class="auth-primary"
+        (click)="choisirAuth('create')">
+        ✚ Créer un portefeuille
+      </button>
+
+      <button
+        type="button"
+        class="auth-secondary"
+        (click)="choisirAuth('import')">
+        ↓ Importer un portefeuille
+      </button>
+
+      <button
+        type="button"
+        class="auth-secondary"
+        (click)="choisirAuth(vaultExists ? 'unlock' : 'import')">
+        🔑 Se connecter
+      </button>
+
+      <p class="auth-hint">
+        Vos clés restent sous votre contrôle.
+      </p>
     </div>
     <div *ngIf="authMode === 'create' || authMode === 'import'">
       <p *ngIf="authMode === 'import'">Saisissez votre phrase uniquement dans cette application de confiance, jamais dans un formulaire envoyé par message.</p>
@@ -36,465 +57,32 @@
 <div class="app">
 
   <button class="auth-lock" (click)="verrouiller()" *ngIf="vaultExists" aria-label="Verrouiller le portefeuille">🔒 Verrouiller</button>
-  <!-- HEADER -->
-  <header class="topbar">
-
-    <div class="brand">
-
-      <div class="logo">
-        D
-      </div>
-
-      <div>
-        <div class="brand-title">
-          DIGEVRA <span>DApp</span>
-        </div>
-
-        <div class="brand-subtitle">
-          Portefeuille & Transactions sur le réseau DIGEVRA
-        </div>
-      </div>
-
-    </div>
-
+  <!-- HEADER DIGEVRA V3 -->
+  <header class="topbar v3-topbar">
+    <div class="brand"><div class="logo">D</div><div><div class="brand-title">DIGEVRA <span>Wallet</span></div><div class="brand-subtitle">Portefeuille numérique · EVM</div></div></div>
     <nav class="nav-tabs" aria-label="Navigation principale">
-
-      <button
-        [class.active]="vueActive === 'wallet'"
-        (click)="ouvrirWalletView()"
-      >
-        ▣ Wallet
-      </button>
-
-      <button
-        [class.active]="vueActive === 'activite'"
-        (click)="ouvrirActivite()"
-      >
-        ◷ Activité
-      </button>
-
-      <button
-        [class.active]="vueActive === 'parametres'"
-        (click)="ouvrirParametres()"
-      >
-        ⚙ Paramètres
-      </button>
-
+      <button [class.active]="vueActive === 'wallet'" (click)="ouvrirWalletView()">⌂ Accueil</button>
+      <button [class.active]="vueActive === 'activite'" (click)="ouvrirActivite()">◷ Historique</button>
+      <button [class.active]="vueActive === 'parametres'" (click)="ouvrirParametres()">⚙ Paramètres</button>
     </nav>
-
-    <div class="network-pill" role="status">
-
-      <span
-        class="status-dot"
-        [class.offline]="!reseauEnLigne"
-      ></span>
-
-      <div>
-        <strong>
-          Réseau DIGEVRA
-        </strong>
-
-        <small>
-          Chain ID: {{ chainId }}
-        </small>
-      </div>
-
+    <div class="v3-header-actions">
+      <div class="network-pill" role="status"><span class="status-dot" [class.offline]="!reseauEnLigne"></span><div><strong>{{ nomReseau }}</strong><small>{{ reseauEnLigne ? 'Backend accessible' : 'Connexion non vérifiée' }} · ID {{ chainId }}</small></div></div>
+      <button type="button" class="v3-icon-button" (click)="ouvrirParametres()" aria-label="Paramètres">⚙</button>
     </div>
-
   </header>
 
-  <!-- =========================
-       WALLET VIEW
-       ========================= -->
-
-  <main
-    *ngIf="vueActive === 'wallet'"
-    class="content"
-  >
-
-    <!-- HERO -->
-    <section class="hero">
-
-      <div>
-        <h1>
-          Votre portefeuille DIGEVRA
-        </h1>
-
-        <p>
-          Envoyez, recevez et suivez vos DGV
-          en toute simplicité.
-        </p>
+  <main *ngIf="vueActive === 'wallet'" class="content v3-content">
+    <div class="v3-heading"><div><p class="v3-eyebrow">VOTRE ESPACE DIGEVRA</p><h1>Tableau de bord</h1><p class="v3-muted">Gérez votre portefeuille et consultez son activité.</p></div><span class="v3-test-badge">{{ nomReseau }}</span></div>
+    <section class="v3-account card" aria-label="Compte actif"><div class="v3-avatar">W1</div><div class="v3-account-copy"><strong>Portefeuille principal</strong><span>{{ raccourcirAdresse(adresseWallet) }}</span></div><span class="v3-account-tag">Actif</span><button type="button" class="v3-icon-button" (click)="copierAdresse()" aria-label="Copier l'adresse">⧉</button></section>
+    <p class="v3-inline-note" *ngIf="messageCopie">{{ messageCopie }}</p>
+    <div class="v3-layout">
+      <div class="v3-primary-column">
+        <section class="v3-balance card"><div class="v3-token-header"><div class="v3-token-icon">DGV</div><div><strong>DIGEVRA</strong><span>Solde communiqué par le backend DIGEVRA</span></div><span class="v3-chevron">›</span></div><div class="v3-balance-caption">SOLDE DISPONIBLE</div><div class="v3-balance-number" *ngIf="reseauEnLigne; else v3Unavailable">{{ soldeDgv | number:'1.2-6' }} <small>DGV</small></div><ng-template #v3Unavailable><div class="v3-balance-number v3-balance-unavailable">Indisponible</div></ng-template><div class="v3-balance-footer">Aucune conversion USD non vérifiée</div></section>
+        <div class="v3-actions"><button type="button" class="v3-action" (click)="ouvrirEnvoi()"><span class="v3-action-icon">↑</span><strong>Envoyer</strong><small>Transférer des DGV</small></button><button type="button" class="v3-action" (click)="ouvrirReception()"><span class="v3-action-icon">↓</span><strong>Recevoir</strong><small>Adresse et QR code</small></button></div>
+        <section class="card v3-recent"><div class="v3-section-heading"><h2>Transactions récentes</h2><button type="button" (click)="ouvrirActivite()">Voir tout →</button></div><p class="v3-empty" *ngIf="transactions.length === 0">Aucune transaction à afficher.</p><div class="v3-tx" *ngFor="let tx of transactions | slice:0:4"><span class="v3-tx-icon">{{ estEnvoyee(tx) ? '↑' : '↓' }}</span><div><strong>{{ estEnvoyee(tx) ? 'Envoi' : 'Réception' }}</strong><small>{{ raccourcirAdresse(estEnvoyee(tx) ? (tx.to ?? tx.toAddress) : (tx.from ?? tx.fromAddress)) }}</small></div><strong>{{ estEnvoyee(tx) ? '-' : '+' }}{{ obtenirMontant(tx) | number:'1.2-6' }} DGV</strong></div></section>
       </div>
-
-      <div class="coin-area">
-
-        <div class="coin coin-small"></div>
-
-        <div class="coin coin-main">
-          DGV
-        </div>
-
-        <div class="coin coin-small"></div>
-
-      </div>
-
-    </section>
-
-    <div class="dashboard-grid">
-
-      <!-- WALLET -->
-      <section class="card wallet-card">
-
-        <div class="card-header">
-
-          <div class="card-title">
-            <span class="icon">
-              ◫
-            </span>
-
-            Mon Wallet
-          </div>
-
-          <span
-            class="connected-badge"
-            [class.disconnected]="!walletConnecte"
-          >
-            ●
-            {{
-              walletConnecte
-                ? 'Connecté'
-                : 'Non connecté'
-            }}
-          </span>
-
-        </div>
-
-        <div
-          *ngIf="walletConnecte"
-          class="wallet-body"
-        >
-
-          <div class="wallet-icon">
-            ▣
-          </div>
-
-          <div class="wallet-info">
-
-            <span class="label">
-              Adresse
-            </span>
-
-            <div class="address-row">
-
-              <strong>
-                {{ adresseWallet }}
-              </strong>
-
-              <button
-                class="copy-button"
-                (click)="copierAdresse()"
-              >
-                ⧉
-              </button>
-
-            </div>
-
-            <span class="label balance-label">
-              Solde disponible
-            </span>
-
-            <div class="balance">
-              {{
-                soldeDgv
-                  | number:'1.2-6'
-              }}
-              DGV
-            </div>
-
-          </div>
-
-        </div>
-
-        <div
-          *ngIf="!walletConnecte"
-          class="wallet-empty"
-        >
-
-          <h3>
-            Aucun wallet connecté
-          </h3>
-
-          <p>
-            Ouvrez DIGEVRA Wallet pour
-            connecter votre portefeuille.
-          </p>
-
-          <button
-            class="primary-button"
-            (click)="ouvrirWallet()"
-          >
-            Connecter DIGEVRA Wallet
-          </button>
-
-        </div>
-
-      </section>
-
-      <!-- TRANSFERT -->
-      <section class="card transfer-card">
-
-        <div class="card-title">
-          <span class="icon">
-            ⇄
-          </span>
-
-          <div>
-            Transfert
-
-            <small>
-              Envoyez ou recevez des DGV
-            </small>
-          </div>
-        </div>
-
-        <div class="transfer-actions">
-
-          <button
-            class="transfer-button send"
-            (click)="ouvrirEnvoi()"
-          >
-            <span class="big-icon">
-              ➤
-            </span>
-
-            <strong>
-              Envoyer
-            </strong>
-
-            <small>
-              Transférer des DGV
-            </small>
-          </button>
-
-          <button
-            class="transfer-button receive"
-            (click)="ouvrirReception()"
-          >
-            <span class="big-icon">
-              ⌗
-            </span>
-
-            <strong>
-              Recevoir
-            </strong>
-
-            <small>
-              Obtenir mon adresse
-              et QR Code
-            </small>
-          </button>
-
-        </div>
-
-      </section>
-
-      <!-- DERNIERES TRANSACTIONS -->
-      <section class="card transactions-card">
-
-        <div class="card-header">
-
-          <div class="card-title">
-            〽 Dernières transactions
-          </div>
-
-          <button
-            class="view-all"
-            (click)="ouvrirActivite()"
-          >
-            Voir tout →
-          </button>
-
-        </div>
-
-        <div
-          *ngIf="transactions.length === 0"
-          class="empty-state"
-        >
-          Aucune transaction disponible.
-        </div>
-
-        <div
-          *ngFor="
-            let tx of transactions | slice:0:3
-          "
-          class="transaction-row"
-        >
-
-          <div
-            class="transaction-icon"
-            [class.sent]="estEnvoyee(tx)"
-          >
-            {{
-              estEnvoyee(tx)
-                ? '↑'
-                : '↓'
-            }}
-          </div>
-
-          <div class="transaction-main">
-
-            <strong>
-              {{
-                estEnvoyee(tx)
-                  ? 'Envoi'
-                  : 'Réception'
-              }}
-            </strong>
-
-            <span>
-              {{
-                estEnvoyee(tx)
-                  ? 'Vers'
-                  : 'De'
-              }}
-
-              {{
-                raccourcirAdresse(
-                  estEnvoyee(tx)
-                    ? (
-                        tx.to ??
-                        tx.toAddress
-                      )
-                    : (
-                        tx.from ??
-                        tx.fromAddress
-                      )
-                )
-              }}
-            </span>
-
-          </div>
-
-          <div
-            class="transaction-value"
-            [class.received]="!estEnvoyee(tx)"
-          >
-            {{
-              estEnvoyee(tx)
-                ? '-'
-                : '+'
-            }}
-
-            {{
-              obtenirMontant(tx)
-                | number:'1.2-6'
-            }}
-
-            DGV
-          </div>
-
-          <div class="transaction-date">
-
-            <span
-              *ngIf="obtenirDate(tx) as date"
-            >
-              {{
-                date
-                  | date:'dd/MM HH:mm'
-              }}
-            </span>
-
-          </div>
-
-        </div>
-
-      </section>
-
-      <!-- NETWORK -->
-      <section class="card network-card">
-
-        <div class="card-header">
-
-          <div class="card-title">
-            ◈ Réseau DIGEVRA
-          </div>
-
-          <span
-            class="online-badge"
-            [class.offline]="!reseauEnLigne"
-          >
-            ●
-            {{
-              reseauEnLigne
-                ? 'En ligne'
-                : 'Hors ligne'
-            }}
-          </span>
-
-        </div>
-
-        <div class="network-row">
-
-          <span>
-            Consensus
-          </span>
-
-          <strong>
-            {{ consensus }}
-          </strong>
-
-        </div>
-
-        <div class="network-row">
-
-          <span>
-            Chain ID
-          </span>
-
-          <strong>
-            {{ chainId }}
-          </strong>
-
-        </div>
-
-        <div class="network-row">
-
-          <span>
-            Dernier bloc
-          </span>
-
-          <button
-            class="network-link"
-            (click)="ouvrirBloc(dernierBloc)"
-          >
-            {{ dernierBloc }}
-          </button>
-
-        </div>
-
-        <div class="network-row">
-
-          <span>
-            Transactions
-          </span>
-
-          <strong>
-            {{ totalTransactions }}
-          </strong>
-
-        </div>
-
-        <button
-          class="explorer-button"
-          (click)="ouvrirExplorer()"
-        >
-          Ouvrir DIGEVRA Explorer
-        </button>
-
-      </section>
-
+      <aside class="v3-secondary-column"><section class="card v3-network"><div class="v3-section-heading"><h2>Réseau actif</h2><span [class.v3-offline]="!reseauEnLigne" class="v3-status">{{ reseauEnLigne ? 'Backend en ligne' : 'Hors ligne' }}</span></div><div class="v3-network-title"><span class="v3-network-symbol">◈</span><div><strong>{{ nomReseau }}</strong><small>Chain ID {{ chainId }}</small></div></div><div class="network-row"><span>Consensus déclaré</span><strong>{{ consensus }}</strong></div><div class="network-row"><span>Dernier bloc</span><button class="network-link" (click)="ouvrirBloc(dernierBloc)">{{ dernierBloc }}</button></div><div class="network-row"><span>Transactions</span><strong>{{ totalTransactions }}</strong></div><p class="v3-network-warning">Sepolia (ID 11155111) n'est pas configuré dans les fichiers transmis. Ne pas envoyer de fonds Sepolia via ce backend.</p><button class="explorer-button" (click)="ouvrirExplorer()">Ouvrir DIGEVRA Explorer ↗</button></section></aside>
     </div>
-
   </main>
 
   <!-- =========================
@@ -649,7 +237,7 @@
         {{ messageCopie }}
       </p>
 
-      <span class="network-label">Réseau DIGEVRA · DGV</span>
+      <span class="network-label">{{ nomReseau }} · DGV</span>
     </section>
   </div>
 
@@ -773,7 +361,7 @@
 
         <div class="settings-row">
           <span>Nom</span>
-          <strong>DIGEVRA</strong>
+          <strong>{{ nomReseau }}</strong>
         </div>
 
         <div class="settings-row">
@@ -840,6 +428,14 @@
     </div>
 
   </main>
+
+  <nav class="v3-mobile-nav" aria-label="Navigation mobile">
+    <button [class.active]="vueActive === 'wallet'" (click)="ouvrirWalletView()"><span>⌂</span>Accueil</button>
+    <button [class.active]="vueActive === 'activite'" (click)="ouvrirActivite()"><span>◷</span>Historique</button>
+    <button (click)="ouvrirEnvoi()"><span>↑</span>Envoyer</button>
+    <button [class.active]="vueActive === 'parametres'" (click)="ouvrirParametres()"><span>⚙</span>Paramètres</button>
+    <button (click)="ouvrirExplorer()"><span>↗</span>Explorer</button>
+  </nav>
 
 </div>
 

@@ -11,15 +11,50 @@ import {
   HttpClientModule
 } from '@angular/common/http';
 import {
-  Contract,
+  formatEther,
   JsonRpcProvider,
   Wallet,
-  isAddress,
-  parseEther
+  isAddress
 } from 'ethers';
-import QRCode from 'qrcode';
 
 import { HDNodeWallet } from 'ethers';
+import {
+  displayRpcEndpoint,
+  isNetworkKey,
+  NETWORKS,
+  NetworkKey
+} from './network-config';
+import { NetworkService } from './network.service';
+
+interface WalletTransaction {
+  hash?: string;
+  from?: string;
+  fromAddress?: string;
+  to?: string;
+  toAddress?: string;
+  valueDgv?: number | string;
+  value?: number | string;
+  timestamp?: number | string;
+  blockNumber?: number | string;
+}
+
+interface WalletSummaryResponse {
+  balanceDgv?: unknown;
+  transactions?: unknown;
+}
+
+interface NetworkStatsResponse {
+  latestBlock?: unknown;
+  totalTransactions?: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isWalletTransaction(value: unknown): value is WalletTransaction {
+  return isRecord(value);
+}
 
 @Component({
   selector: 'app-root',
@@ -34,12 +69,67 @@ import { HDNodeWallet } from 'ethers';
 })
 export class App implements OnInit, OnDestroy {
 
-  backendUrl = 'http://localhost:3000';
-  walletUrl = 'http://localhost:4200';
-  explorerUrl = 'http://localhost:4201';
+  activeNetworkKey: NetworkKey = 'digevra-local';
+  chainId: number | null = null;
+  rpcConnected = false;
+  networkSwitchInProgress = false;
+  networkError = '';
+  actualChainId: number | null = null;
+  smartWalletDeployed = false;
+  soldeEth: string | null = null;
+  soldeDgvDisplay = '—';
+  soldeDgvMessage = '';
+  private rpcProvider: JsonRpcProvider | null = null;
+  private networkSwitchSequence = 0;
 
-  chainId = 20261019;
-  consensus = 'QBFT (4 validateurs)';
+  get activeNetwork() {
+    return NETWORKS[this.activeNetworkKey];
+  }
+
+  // Libellé basé sur la configuration effective, pas sur une sélection visuelle.
+  get nomReseau(): string {
+    return this.activeNetwork.name;
+  }
+
+  get consensus(): string {
+    return this.activeNetwork.consensus;
+  }
+
+  get backendUrl(): string {
+    return this.activeNetwork.backendUrl ?? 'Non configuré';
+  }
+
+  get walletUrl(): string | null {
+    return this.activeNetwork.walletUrl;
+  }
+
+  get explorerUrl(): string {
+    return this.activeNetwork.explorerUrl ?? '';
+  }
+
+  get rpcEndpointDisplay(): string {
+    return displayRpcEndpoint(this.activeNetwork.rpcUrl);
+  }
+
+  get transactionUnavailableReason(): string {
+    if (!this.rpcConnected) {
+      return 'Les transactions sont désactivées tant que la connexion RPC n’est pas vérifiée.';
+    }
+
+    if (!this.activeNetwork.smartWalletAddress) {
+      return 'Aucun Smart Wallet déployé n’est configuré pour ce réseau.';
+    }
+
+    if (!this.smartWalletDeployed) {
+      return 'Le Smart Wallet configuré n’a pas de contrat déployé sur ce réseau.';
+    }
+
+    if (!this.activeNetwork.dgvTokenAddress && !this.activeNetwork.nativeCurrency.verified) {
+      return 'L’actif DGV et son contrat ne sont pas vérifiés sur ce réseau.';
+    }
+
+    return 'Les transferts restent indisponibles tant que l’intégration transactionnelle n’est pas vérifiée.';
+  }
 
   vueActive: 'wallet' | 'activite' | 'parametres' = 'wallet';
 
@@ -61,8 +151,9 @@ export class App implements OnInit, OnDestroy {
   sessionWallet: ReturnType<typeof Wallet.createRandom> | null = null;
   sessionAddress = '';
   soldeDgv = 0;
+  walletDataError = '';
 
-  transactions: any[] = [];
+  transactions: WalletTransaction[] = [];
 
   dernierBloc = 0;
   totalTransactions = 0;
@@ -83,35 +174,27 @@ export class App implements OnInit, OnDestroy {
   private walletWindow: Window | null = null;
   private demandeTransactionId = '';
   demandeAutorisationSessionId = '';
-  private readonly RPC_URL = 'http://127.0.0.1:9545';
-  private readonly SMART_WALLET_ADDRESS =
-    '0xf0571df1FB4a56b83aD3962D4167C2cAE32F25d1';
-  private readonly SMART_WALLET_ABI = [
-    'function execute(address to, uint256 value)',
-    'function sessionActive() view returns (bool)',
-    'function sessionKey() view returns (address)',
-    'function sessionSpent() view returns (uint256)',
-    'function maxPerTransaction() view returns (uint256)',
-    'function maxSessionAmount() view returns (uint256)'
-  ];
   sessionAutorisee = false;
 
   constructor(
     private http: HttpClient,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private networkService: NetworkService
   ) {
-    this.chargerStats();
-
     this.intervalId = setInterval(() => {
-      this.chargerStats();
-
+      if (this.activeNetworkKey === 'digevra-local') {
+        this.chargerStats();
+      } else {
+        void this.actualiserBlocReseau();
+      }
       if (this.adresseWallet) {
         this.chargerWallet();
       }
-    }, 5000);
+    }, 15000);
   }
 
   ngOnInit() {
+    void this.changerReseau('digevra-local');
     window.addEventListener(
       'message',
       this.recevoirMessageWallet
@@ -122,12 +205,12 @@ export class App implements OnInit, OnDestroy {
       this.walletWindow = walletWindow;
       walletWindow.postMessage(
         { type: 'DIGEVRA_DAPP_READY' },
-        this.walletUrl
+        NETWORKS['digevra-local'].walletUrl ?? ''
       );
     }
 
     this.vaultExists = !!localStorage.getItem(this.vaultKey);
-    this.authMode = this.vaultExists ? 'unlock' : 'welcome';
+    this.authMode = 'welcome';
     const adresseSauvegardee = localStorage.getItem(
       'digevra_connected_address'
     );
@@ -143,6 +226,94 @@ export class App implements OnInit, OnDestroy {
       this.sessionAddress = '';
       this.chargerWallet();
     }
+  }
+
+  async changerReseau(networkKey: string): Promise<void> {
+    if (!isNetworkKey(networkKey)) {
+      this.networkError = 'Le réseau sélectionné n’est pas pris en charge.';
+      return;
+    }
+
+    const requestId = ++this.networkSwitchSequence;
+    const config = NETWORKS[networkKey];
+    this.networkSwitchInProgress = true;
+    this.networkError = '';
+    this.cdr.detectChanges();
+
+    try {
+      const connection = await this.networkService.connect(config);
+      if (requestId !== this.networkSwitchSequence) {
+        this.networkService.destroy(connection.provider);
+        return;
+      }
+
+      const previousProvider = this.rpcProvider;
+      this.rpcProvider = connection.provider;
+      this.activeNetworkKey = networkKey;
+      this.chainId = connection.chainId;
+      this.actualChainId = connection.chainId;
+      this.dernierBloc = connection.blockNumber;
+      this.smartWalletDeployed = connection.smartWalletDeployed;
+      this.rpcConnected = true;
+      this.reseauEnLigne = false;
+      this.networkError = '';
+      this.soldeEth = null;
+      this.soldeDgv = 0;
+      this.soldeDgvDisplay = '—';
+      this.soldeDgvMessage = networkKey === 'ethereum-sepolia' &&
+        !config.dgvTokenAddress
+        ? 'Token DGV non configuré sur ce réseau'
+        : '';
+      this.transactions = [];
+      this.totalTransactions = 0;
+
+      if (previousProvider && previousProvider !== connection.provider) {
+        this.networkService.destroy(previousProvider);
+      }
+
+      if (config.backendUrl) {
+        this.chargerStats();
+      }
+      if (this.adresseWallet) {
+        this.chargerWallet();
+      }
+    } catch (error) {
+      if (requestId === this.networkSwitchSequence) {
+        this.networkError = error instanceof Error
+          ? error.message
+          : `Impossible de vérifier le réseau ${config.name}.`;
+      }
+    } finally {
+      if (requestId === this.networkSwitchSequence) {
+        this.networkSwitchInProgress = false;
+        this.cdr.detectChanges();
+      }
+    }
+  }
+
+  private async actualiserBlocReseau(): Promise<void> {
+    if (!this.rpcProvider) {
+      return;
+    }
+
+    try {
+      const [network, blockNumber] = await Promise.all([
+        this.rpcProvider.getNetwork(),
+        this.rpcProvider.getBlockNumber()
+      ]);
+      if (network.chainId !== BigInt(this.activeNetwork.chainId)) {
+        throw new Error('Le Chain ID RPC ne correspond plus au réseau actif.');
+      }
+      this.actualChainId = Number(network.chainId);
+      this.dernierBloc = blockNumber;
+      this.rpcConnected = true;
+      this.networkError = '';
+    } catch {
+      this.rpcConnected = false;
+      this.actualChainId = null;
+      this.networkError = `La connexion RPC à ${this.activeNetwork.name} a été perdue.`;
+    }
+    this.cdr.detectChanges();
   }
 
   choisirAuth(mode: 'welcome' | 'create' | 'import' | 'unlock') {
@@ -225,9 +396,18 @@ export class App implements OnInit, OnDestroy {
     this.walletConnecte = false;
     this.adresseWallet = '';
     this.soldeDgv = 0;
+    this.soldeDgvDisplay = '—';
+    this.soldeEth = null;
     this.transactions = [];
     this.sessionWallet = null;
+    this.sessionAddress = '';
     this.sessionAutorisee = false;
+    this.demandeAutorisationSessionId = '';
+    this.arreterTimeoutSignature();
+    this.authPassword = '';
+    this.authConfirm = '';
+    this.authPhrase = '';
+    this.recoveryPhrase = '';
     this.fermerTransfert();
     this.choisirAuth('unlock');
   }
@@ -243,12 +423,19 @@ export class App implements OnInit, OnDestroy {
     this.sessionWallet = null;
     this.sessionAddress = '';
     this.unlockedWallet = null;
+    this.authPassword = '';
+    this.authConfirm = '';
+    this.authPhrase = '';
+    this.recoveryPhrase = '';
+    this.rpcProvider?.destroy();
+    this.rpcProvider = null;
   }
 
   recevoirMessageWallet = (
     event: MessageEvent
   ) => {
     if (
+      !this.walletUrl ||
       event.origin !== this.walletUrl ||
       event.source !== this.walletWindow
     ) {
@@ -345,19 +532,7 @@ export class App implements OnInit, OnDestroy {
         return;
       }
 
-      this.dernierHashTransaction = data.hash;
-      this.transactionEnCours = false;
-      this.demandeTransactionId = '';
-      this.arreterTimeoutSignature();
-      this.messageTransaction = 'Transaction confirmée.';
-      this.adresseDestinataire = '';
-      this.montantEnvoi = 0;
-      this.chargerWallet();
-
-      setTimeout(() => {
-        this.chargerWallet();
-        this.chargerStats();
-      }, 6000);
+      void this.verifierTransactionConfirmee(data.hash);
     } else if (data.type === 'DIGEVRA_TRANSACTION_REJECTED') {
       this.transactionEnCours = false;
       this.demandeTransactionId = '';
@@ -376,6 +551,13 @@ export class App implements OnInit, OnDestroy {
   };
 
   ouvrirWallet() {
+    const walletUrl = NETWORKS['digevra-local'].walletUrl;
+    if (this.activeNetworkKey !== 'digevra-local' || !walletUrl) {
+      this.messageTransaction =
+        'La connexion à DIGEVRA Wallet externe n’est disponible que sur le réseau DIGEVRA local.';
+      return;
+    }
+
     if (
       this.walletWindow &&
       !this.walletWindow.closed
@@ -385,7 +567,7 @@ export class App implements OnInit, OnDestroy {
     }
 
     this.walletWindow = window.open(
-      'http://localhost:4200',
+      walletUrl,
       'DIGEVRA-Wallet',
       'width=1200,height=850'
     );
@@ -418,11 +600,6 @@ export class App implements OnInit, OnDestroy {
     this.sessionAddress = sessionWallet.address;
     this.sessionAutorisee = false;
 
-    console.log(
-      'Session DIGEVRA créée :',
-      this.sessionAddress
-    );
-
     this.demanderAutorisationSession();
   }
 
@@ -443,6 +620,12 @@ export class App implements OnInit, OnDestroy {
     ) {
       this.messageTransaction =
         'Ouvrez DIGEVRA Wallet pour autoriser cette session.';
+      return;
+    }
+
+    if (!this.walletUrl) {
+      this.messageTransaction =
+        'Aucun Wallet externe n’est configuré pour le réseau actif.';
       return;
     }
 
@@ -476,11 +659,14 @@ export class App implements OnInit, OnDestroy {
 
     this.walletConnecte = false;
     this.adresseWallet = '';
+    this.unlockedWallet = null;
     this.sessionWallet = null;
     this.sessionAddress = '';
     this.sessionAutorisee = false;
     this.demandeAutorisationSessionId = '';
     this.soldeDgv = 0;
+    this.soldeDgvDisplay = '—';
+    this.soldeEth = null;
     this.transactions = [];
     localStorage.removeItem(
       'digevra_connected_address'
@@ -500,7 +686,8 @@ export class App implements OnInit, OnDestroy {
     this.messageTransaction = '';
 
     try {
-      this.qrCodeDataUrl = await QRCode.toDataURL(
+      const QRCode = await import('qrcode');
+      this.qrCodeDataUrl = await QRCode.default.toDataURL(
         this.adresseWallet,
         {
           width: 240,
@@ -529,6 +716,9 @@ export class App implements OnInit, OnDestroy {
     this.panneauTransfert = 'envoyer';
     this.messageTransaction = '';
     this.dernierHashTransaction = '';
+    if (this.transactionUnavailableReason) {
+      this.messageTransaction = this.transactionUnavailableReason;
+    }
   }
 
   fermerTransfert() {
@@ -545,20 +735,29 @@ export class App implements OnInit, OnDestroy {
     this.demandeTransactionId = '';
   }
 
-  async preparerEnvoi() {
-    if (this.unlockedWallet) {
-      this.messageTransaction = 'Envoi indisponible : le portefeuille local doit encore être intégré à un RPC public et au contrat DGV vérifié. Aucun transfert ne sera signé.';
-      return;
-    }
+  async preparerEnvoi(): Promise<void> {
     if (this.transactionEnCours) {
       return;
     }
 
-    this.messageTransaction = '';
+    if (!isAddress(this.adresseDestinataire)) {
+      this.messageTransaction = 'Adresse destinataire invalide.';
+      return;
+    }
 
-    if (!this.sessionWallet || !this.sessionAddress) {
+    if (!Number.isFinite(this.montantEnvoi) || this.montantEnvoi <= 0) {
+      this.messageTransaction = 'Montant invalide.';
+      return;
+    }
+
+    if (this.montantEnvoi > 10) {
+      this.messageTransaction = 'Maximum autorisé : 10 DGV par transaction.';
+      return;
+    }
+
+    if (this.unlockedWallet) {
       this.messageTransaction =
-        'Aucune session DIGEVRA active.';
+        'Envoi désactivé : le portefeuille local n’est pas intégré à un parcours transactionnel vérifié.';
       return;
     }
 
@@ -568,163 +767,91 @@ export class App implements OnInit, OnDestroy {
       return;
     }
 
-    if (
-      !/^0x[a-fA-F0-9]{40}$/.test(
-        this.adresseDestinataire
-      )
-    ) {
+    if (!this.rpcProvider || !this.rpcConnected) {
       this.messageTransaction =
-        'Adresse destinataire invalide.';
+        'La connexion RPC du réseau actif n’est pas vérifiée.';
       return;
     }
-
-    if (!this.montantEnvoi || this.montantEnvoi <= 0) {
-      this.messageTransaction = 'Montant invalide.';
-      return;
-    }
-
-    if (this.montantEnvoi > 10) {
-      this.messageTransaction =
-        'Maximum autorisé : 10 DGV par transaction.';
-      return;
-    }
-
-    this.transactionEnCours = true;
-    let provider: JsonRpcProvider | null = null;
 
     try {
-      provider = new JsonRpcProvider(
-        this.RPC_URL,
-        this.chainId
-      );
-      const network = await provider.getNetwork();
-      if (network.chainId !== BigInt(this.chainId)) {
+      const config = this.activeNetwork;
+      const network = await this.rpcProvider.getNetwork();
+      if (network.chainId !== BigInt(config.chainId)) {
+        this.rpcConnected = false;
+        this.actualChainId = null;
+        throw new Error('Le Chain ID RPC ne correspond pas au réseau sélectionné.');
+      }
+
+      if (!config.smartWalletAddress) {
+        throw new Error('Aucun Smart Wallet déployé n’est configuré pour ce réseau.');
+      }
+
+      const contractCode = await this.rpcProvider.getCode(config.smartWalletAddress);
+      this.smartWalletDeployed = contractCode !== '0x';
+      if (!this.smartWalletDeployed) {
         throw new Error(
-          `Réseau incorrect : Chain ID ${network.chainId}.`
+          'Envoi désactivé : aucun contrat Smart Wallet n’est déployé à l’adresse configurée sur ce réseau.'
         );
       }
 
-      const contractCode = await provider.getCode(
-        this.SMART_WALLET_ADDRESS
-      );
-      if (contractCode === '0x') {
+      if (!config.dgvTokenAddress && !config.nativeCurrency.verified) {
         throw new Error(
-          'Le Smart Wallet est introuvable sur ce réseau.'
+          'Envoi désactivé : l’actif DGV et son contrat ne sont pas vérifiés sur ce réseau.'
         );
       }
 
-      const signer = this.sessionWallet.connect(provider);
+      if (!this.sessionWallet || !this.sessionAddress || !this.sessionAutorisee) {
+        throw new Error('Une session Smart Wallet vérifiée et autorisée est requise.');
+      }
+
+      this.messageTransaction =
+        'Envoi bloqué : le parcours de confirmation et les contrôles d’actif ne sont pas vérifiés.';
+    } catch (error) {
+      this.messageTransaction = error instanceof Error
+        ? error.message
+        : 'Impossible de vérifier les prérequis transactionnels.';
+    } finally {
+      this.cdr.detectChanges();
+    }
+  }
+
+  private async verifierTransactionConfirmee(hash: string): Promise<void> {
+    const provider = this.rpcProvider;
+    if (!provider || !this.rpcConnected) {
+      this.messageTransaction =
+        'Le hash a été reçu, mais le statut ne peut pas être vérifié sans RPC.';
+      this.transactionEnCours = false;
+      this.demandeTransactionId = '';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    try {
+      const [network, receipt] = await Promise.all([
+        provider.getNetwork(),
+        provider.getTransactionReceipt(hash)
+      ]);
       if (
-        signer.address.toLowerCase() !==
-        this.sessionAddress.toLowerCase()
+        network.chainId !== BigInt(this.activeNetwork.chainId) ||
+        !receipt ||
+        receipt.status !== 1
       ) {
-        throw new Error('Adresse du signer de session incohérente.');
+        throw new Error('La transaction n’a pas été confirmée sur le réseau actif.');
       }
 
-      const contract = new Contract(
-        this.SMART_WALLET_ADDRESS,
-        this.SMART_WALLET_ABI,
-        signer
-      );
-
-      const [active, authorizedSession, spent, perTransactionLimit, sessionLimit] =
-        await Promise.all([
-          contract['sessionActive']() as Promise<boolean>,
-          contract['sessionKey']() as Promise<string>,
-          contract['sessionSpent']() as Promise<bigint>,
-          contract['maxPerTransaction']() as Promise<bigint>,
-          contract['maxSessionAmount']() as Promise<bigint>
-        ]);
-
-      if (!active) {
-        this.sessionAutorisee = false;
-        throw new Error('La session Smart Wallet est inactive.');
-      }
-
-      if (
-        authorizedSession.toLowerCase() !==
-        this.sessionAddress.toLowerCase()
-      ) {
-        this.sessionAutorisee = false;
-        throw new Error('Cette session n’est pas autorisée.');
-      }
-
-      const amount = parseEther(this.montantEnvoi.toString());
-      if (amount > perTransactionLimit) {
-        throw new Error(
-          'Maximum autorisé : 10 DGV par transaction.'
-        );
-      }
-      if (spent + amount > sessionLimit) {
-        throw new Error(
-          'Limite cumulée de 50 DGV de la session dépassée.'
-        );
-      }
-
-      const smartWalletBalance = await provider.getBalance(
-        this.SMART_WALLET_ADDRESS
-      );
-      if (smartWalletBalance < amount) {
-        throw new Error(
-          'Solde insuffisant dans le Smart Wallet.'
-        );
-      }
-
-      const sessionBalance = await provider.getBalance(
-        this.sessionAddress
-      );
-      const feeData = await provider.getFeeData();
-      const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice;
-      if (gasPrice === null) {
-        throw new Error('Impossible d’estimer le prix du gas.');
-      }
-      if (sessionBalance === 0n) {
-        throw new Error(
-          `Le compte de session ${this.sessionAddress} doit être financé en DGV pour payer le gas.`
-        );
-      }
-      const gasLimit = await contract['execute'].estimateGas(
-        this.adresseDestinataire,
-        amount
-      );
-      if (sessionBalance < gasLimit * gasPrice) {
-        throw new Error(
-          `Solde gas insuffisant pour la session ${this.sessionAddress}.`
-        );
-      }
-
-      this.messageTransaction =
-        'Envoi direct via le Smart Wallet en cours...';
-      const tx = await contract['execute'](
-        this.adresseDestinataire,
-        amount
-      );
-      this.dernierHashTransaction = tx.hash;
-      this.messageTransaction =
-        `Transaction envoyée : ${tx.hash}`;
-
-      const receipt = await tx.wait();
-      if (!receipt || receipt.status !== 1) {
-        throw new Error('La transaction n’a pas été confirmée.');
-      }
-
-      this.messageTransaction =
-        `Transaction confirmée : ${tx.hash}`;
+      this.dernierHashTransaction = hash;
+      this.messageTransaction = `Transaction confirmée : ${hash}`;
       this.adresseDestinataire = '';
       this.montantEnvoi = 0;
       this.chargerWallet();
     } catch (error) {
-      console.error(
-        'Erreur lors de l’envoi direct DIGEVRA :',
-        error
-      );
-      this.messageTransaction =
-        error instanceof Error
-          ? error.message
-          : 'Échec de la transaction DIGEVRA.';
+      this.messageTransaction = error instanceof Error
+        ? error.message
+        : 'Le statut de la transaction n’a pas pu être vérifié.';
     } finally {
-      await provider?.destroy();
       this.transactionEnCours = false;
+      this.demandeTransactionId = '';
+      this.arreterTimeoutSignature();
       this.cdr.detectChanges();
     }
   }
@@ -817,63 +944,187 @@ export class App implements OnInit, OnDestroy {
   }
 
   chargerWallet() {
-    if (!this.adresseWallet) {
+    if (!this.adresseWallet || !this.rpcProvider || !this.rpcConnected) {
       return;
     }
 
+    if (this.activeNetworkKey === 'ethereum-sepolia') {
+      void this.chargerWalletSepolia(
+        this.rpcProvider,
+        this.adresseWallet,
+        this.networkSwitchSequence
+      );
+      return;
+    }
+
+    const backendUrl = this.activeNetwork.backendUrl;
+    if (!backendUrl) {
+      this.walletDataError = 'Backend DIGEVRA non configuré.';
+      return;
+    }
+
+    const networkKey = this.activeNetworkKey;
+    const address = this.adresseWallet;
     this.http
-      .get<any>(
-        `${this.backendUrl}/api/address/${this.adresseWallet}`
+      .get<unknown>(
+        `${backendUrl}/api/address/${encodeURIComponent(address)}`
       )
       .subscribe({
-        next: (data) => {
-          this.soldeDgv =
-            Number(data.balanceDgv ?? 0);
+        next: (response) => {
+          if (
+            networkKey !== this.activeNetworkKey ||
+            address !== this.adresseWallet
+          ) {
+            return;
+          }
+          if (!isRecord(response)) {
+            this.walletDataError = 'Réponse invalide du backend DIGEVRA.';
+            this.cdr.detectChanges();
+            return;
+          }
 
-          this.transactions =
-            data.transactions ?? [];
+          const data = response as WalletSummaryResponse;
+          const balance = Number(data.balanceDgv);
+          if (!Number.isFinite(balance) || balance < 0) {
+            this.walletDataError = 'Solde DGV invalide retourné par le backend.';
+            this.cdr.detectChanges();
+            return;
+          }
+          if (
+            !Array.isArray(data.transactions) ||
+            !data.transactions.every(isWalletTransaction)
+          ) {
+            this.walletDataError = 'Historique invalide retourné par le backend.';
+            this.cdr.detectChanges();
+            return;
+          }
 
+          this.soldeDgv = balance;
+          this.soldeDgvDisplay = balance.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 6
+          });
+          this.soldeDgvMessage =
+            'Solde rapporté par le backend DIGEVRA (nature du token non vérifiée).';
+          this.transactions = data.transactions;
+          this.walletDataError = '';
           this.cdr.detectChanges();
         },
+        error: () => {
+          if (networkKey === this.activeNetworkKey) {
+            this.walletDataError =
+              'Backend DIGEVRA indisponible : le solde et l’historique ne sont pas vérifiés.';
+            this.reseauEnLigne = false;
+            this.cdr.detectChanges();
+          }
+        }
+      });
+  }
 
-        error: (error) => {
-          console.error(
-            'Erreur chargement wallet :',
-            error
-          );
+  private async chargerWalletSepolia(
+    provider: JsonRpcProvider,
+    address: string,
+    requestId: number
+  ): Promise<void> {
+    try {
+      const nativeBalance = await this.networkService.getNativeBalance(
+        provider,
+        address
+      );
+      if (
+        requestId !== this.networkSwitchSequence ||
+        provider !== this.rpcProvider ||
+        address !== this.adresseWallet
+      ) {
+        return;
+      }
 
+      this.soldeEth = nativeBalance;
+      const tokenAddress = this.activeNetwork.dgvTokenAddress;
+      if (!tokenAddress) {
+        this.soldeDgv = 0;
+        this.soldeDgvDisplay = '—';
+        this.soldeDgvMessage = 'Token DGV non configuré sur ce réseau';
+        this.transactions = [];
+        this.walletDataError = '';
+        this.cdr.detectChanges();
+        return;
+      }
+
+      const tokenBalance = await this.networkService.getTokenBalance(
+        provider,
+        tokenAddress,
+        address
+      );
+      if (
+        requestId !== this.networkSwitchSequence ||
+        provider !== this.rpcProvider ||
+        address !== this.adresseWallet
+      ) {
+        return;
+      }
+
+      this.soldeDgvDisplay = `${tokenBalance.amount} ${tokenBalance.symbol}`;
+      const numericBalance = Number(tokenBalance.amount);
+      this.soldeDgv = Number.isFinite(numericBalance) ? numericBalance : 0;
+      this.soldeDgvMessage = '';
+      this.transactions = [];
+      this.walletDataError = '';
+    } catch {
+      if (requestId === this.networkSwitchSequence && provider === this.rpcProvider) {
+        this.walletDataError =
+          'Les soldes Sepolia n’ont pas pu être vérifiés via le RPC.';
+        this.soldeEth = null;
+      }
+    }
+    this.cdr.detectChanges();
+  }
+
+  chargerStats() {
+    const backendUrl = this.activeNetwork.backendUrl;
+    if (!backendUrl || this.activeNetworkKey !== 'digevra-local') {
+      this.reseauEnLigne = false;
+      return;
+    }
+
+    const networkKey = this.activeNetworkKey;
+    this.http
+      .get<unknown>(`${backendUrl}/api/stats`)
+      .subscribe({
+        next: (response) => {
+          if (networkKey !== this.activeNetworkKey || !isRecord(response)) {
+            return;
+          }
+          const data = response as NetworkStatsResponse;
+          const block = Number(data.latestBlock);
+          const transactionCount = Number(data.totalTransactions);
+          if (
+            !Number.isSafeInteger(block) ||
+            block < 0 ||
+            !Number.isSafeInteger(transactionCount) ||
+            transactionCount < 0
+          ) {
+            this.reseauEnLigne = false;
+            this.networkError =
+              'Les statistiques retournées par le backend sont invalides.';
+            this.cdr.detectChanges();
+            return;
+          }
+          this.dernierBloc = block;
+          this.totalTransactions = transactionCount;
+          this.reseauEnLigne = true;
+          this.cdr.detectChanges();
+        },
+        error: () => {
+          this.reseauEnLigne = false;
+          this.networkError = 'Backend DIGEVRA indisponible.';
           this.cdr.detectChanges();
         }
       });
   }
 
-  chargerStats() {
-    this.http
-      .get<any>(
-        `${this.backendUrl}/api/stats`
-      )
-      .subscribe({
-        next: (data) => {
-          this.dernierBloc =
-            Number(data.latestBlock ?? 0);
-
-          this.totalTransactions =
-            Number(data.totalTransactions ?? 0);
-
-          this.reseauEnLigne = true;
-
-          this.cdr.detectChanges();
-        },
-
-        error: (error) => {
-          this.reseauEnLigne = false;
-          console.error(
-            'Erreur chargement statistiques DIGEVRA :',
-            error
-          );
-          this.cdr.detectChanges();
-        }
-      });
+  private async actualiserBlocSepolia(): Promise<void> {
+    await this.actualiserBlocReseau();
   }
 
   ouvrirActivite() {
@@ -933,8 +1184,11 @@ export class App implements OnInit, OnDestroy {
   }
 
   raccourcirAdresse(
-    adresse: string
+    adresse: string | undefined
   ): string {
+    if (typeof adresse !== 'string') {
+      return '';
+    }
 
     if (!adresse) {
       return '';

@@ -17,12 +17,64 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
-  it('should render the wallet dashboard', async () => {
+  it('renders the DIGEVRA auth screen with all welcome options', async () => {
     const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent)
+    expect(compiled.querySelector('.auth-card h1')?.textContent)
       .toContain('DIGEVRA Wallet');
+    expect(compiled.querySelector('.welcome-screen')).toBeNull();
+    expect(compiled.querySelectorAll('.auth-options button')).toHaveLength(3);
+    expect(compiled.querySelector('.auth-back')).toBeNull();
+    fixture.destroy();
+  });
+
+  it('routes auth options to create, import, and local unlock modes', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    const app = fixture.componentInstance;
+    const authButtons = () =>
+      fixture.nativeElement.querySelectorAll(
+        '.auth-options button'
+      ) as NodeListOf<HTMLButtonElement>;
+
+    authButtons()[0].click();
+    expect(app.authMode).toBe('create');
+
+    app.choisirAuth('welcome');
+    fixture.detectChanges();
+    authButtons()[1].click();
+    expect(app.authMode).toBe('import');
+
+    app.choisirAuth('welcome');
+    fixture.detectChanges();
+    authButtons()[2].click();
+    expect(app.authMode).toBe('import');
+
+    fixture.destroy();
+  });
+
+  it('routes connect to unlock when a local vault exists', () => {
+    const previousVault = localStorage.getItem('digevra_vault_v1');
+    localStorage.setItem('digevra_vault_v1', 'encrypted-vault-placeholder');
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    const app = fixture.componentInstance;
+    const connectButton = fixture.nativeElement.querySelectorAll(
+      '.auth-options button'
+    )[2] as HTMLButtonElement;
+
+    connectButton.click();
+
+    expect(app.vaultExists).toBe(true);
+    expect(app.authMode).toBe('unlock');
+    fixture.destroy();
+    if (previousVault === null) {
+      localStorage.removeItem('digevra_vault_v1');
+    } else {
+      localStorage.setItem('digevra_vault_v1', previousVault);
+    }
   });
 
   it('accepts a public address only from the opened Wallet window', () => {
