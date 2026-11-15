@@ -1,6 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import { Wallet } from 'ethers';
 import { App } from './app';
+import { NetworkService } from './network.service';
+import { NETWORKS } from './network-config';
 import { vi } from 'vitest';
 
 describe('App', () => {
@@ -213,7 +215,7 @@ describe('App', () => {
     fixture.destroy();
   });
 
-  it('does not send until the session is authorized', async () => {
+  it('does not send when no wallet is unlocked and session is not authorized', async () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
     const open = vi.spyOn(window, 'open');
@@ -225,14 +227,15 @@ describe('App', () => {
       address: '0x3333333333333333333333333333333333333333'
     } as ReturnType<typeof Wallet.createRandom>;
     app.sessionAddress = app.sessionWallet.address;
+    app.sessionAutorisee = false;
     app.soldeDgv = 5;
     app.adresseDestinataire =
       '0x2222222222222222222222222222222222222222';
     app.montantEnvoi = 1.25;
     await app.preparerEnvoi();
 
-    expect(app.messageTransaction).toBe(
-      'La session doit être autorisée dans DIGEVRA Wallet.'
+    expect(app.messageTransaction).toContain(
+      'Aucun portefeuille autorisé pour signer cette transaction'
     );
     expect(request).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
@@ -267,6 +270,338 @@ describe('App', () => {
     );
 
     expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('does not send when local wallet is unlocked but balance is insufficient for gas', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const networkService = TestBed.inject(NetworkService);
+
+    const mockProvider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: BigInt(20261019) }),
+      getBalance: vi.fn().mockResolvedValue(BigInt(1000000000000)),
+      getFeeData: vi.fn().mockResolvedValue({
+        gasPrice: BigInt(1000000000),
+        maxFeePerGas: null,
+        maxPriorityFeePerGas: null
+      }),
+      getCode: vi.fn().mockResolvedValue('0x1234'),
+      destroy: vi.fn()
+    };
+    (app as any).rpcProvider = mockProvider;
+    app.rpcConnected = true;
+
+    Object.defineProperty(app, 'activeNetwork', {
+      value: {
+        ...NETWORKS['digevra-local'],
+        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+      },
+      configurable: true
+    });
+
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    (app as any).unlockedWallet = {
+      address: '0x1111111111111111111111111111111111111111'
+    } as any;
+    app.sessionAutorisee = false;
+    app.adresseDestinataire =
+      '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1.25;
+
+    vi.spyOn(networkService, 'getTokenBalance').mockResolvedValue({
+      amount: '100',
+      symbol: 'DGV'
+    });
+
+    await app.preparerEnvoi();
+
+    expect(app.messageTransaction).toContain(
+      'Solde natif insuffisant pour les frais de réseau'
+    );
+    expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('does not send when local wallet is unlocked and balance is sufficient', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+
+    const mockProvider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: BigInt(20261019) }),
+      getBalance: vi.fn().mockResolvedValue(BigInt(10000000000000000000)),
+      getFeeData: vi.fn().mockResolvedValue({
+        gasPrice: BigInt(1000000000),
+        maxFeePerGas: null,
+        maxPriorityFeePerGas: null
+      }),
+      getCode: vi.fn().mockResolvedValue('0x1234'),
+      destroy: vi.fn()
+    };
+    (app as any).rpcProvider = mockProvider;
+    app.rpcConnected = true;
+
+    Object.defineProperty(app, 'activeNetwork', {
+      value: {
+        ...NETWORKS['digevra-local'],
+        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+      },
+      configurable: true
+    });
+
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    (app as any).unlockedWallet = {
+      address: '0x1111111111111111111111111111111111111111'
+    } as any;
+    app.sessionAutorisee = false;
+    app.adresseDestinataire =
+      '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1.25;
+
+    vi.spyOn(TestBed.inject(NetworkService), 'getTokenBalance').mockResolvedValue({
+      amount: '100',
+      symbol: 'DGV'
+    });
+
+    await app.preparerEnvoi();
+
+    expect(app.messageTransaction).toContain(
+      'Tous les prérequis sont vérifiés'
+    );
+    expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('does not send when external session is not authorized', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const open = vi.spyOn(window, 'open');
+    const request = vi.spyOn(app, 'demanderSignatureWallet');
+
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    app.sessionWallet = {
+      address: '0x3333333333333333333333333333333333333333'
+    } as ReturnType<typeof Wallet.createRandom>;
+    app.sessionAddress = app.sessionWallet.address;
+    app.sessionAutorisee = false;
+    (app as any).unlockedWallet = null;
+    app.adresseDestinataire =
+      '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1.25;
+    await app.preparerEnvoi();
+
+    expect(app.messageTransaction).toContain(
+      'Aucun portefeuille autorisé pour signer cette transaction'
+    );
+    expect(request).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('sends when external session is authorized and balance is sufficient', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+
+    const mockProvider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: BigInt(20261019) }),
+      getBalance: vi.fn().mockResolvedValue(BigInt(10000000000000000000)),
+      getFeeData: vi.fn().mockResolvedValue({
+        gasPrice: BigInt(1000000000),
+        maxFeePerGas: null,
+        maxPriorityFeePerGas: null
+      }),
+      getCode: vi.fn().mockResolvedValue('0x1234'),
+      destroy: vi.fn()
+    };
+    (app as any).rpcProvider = mockProvider;
+    app.rpcConnected = true;
+
+    Object.defineProperty(app, 'activeNetwork', {
+      value: {
+        ...NETWORKS['digevra-local'],
+        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+      },
+      configurable: true
+    });
+
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    app.sessionWallet = {
+      address: '0x3333333333333333333333333333333333333333'
+    } as ReturnType<typeof Wallet.createRandom>;
+    app.sessionAddress = app.sessionWallet.address;
+    app.sessionAutorisee = true;
+    (app as any).unlockedWallet = null;
+    app.adresseDestinataire =
+      '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1.25;
+
+    vi.spyOn(TestBed.inject(NetworkService), 'getTokenBalance').mockResolvedValue({
+      amount: '100',
+      symbol: 'DGV'
+    });
+
+    await app.preparerEnvoi();
+
+    expect(app.messageTransaction).toContain(
+      'Tous les prérequis sont vérifiés'
+    );
+    expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('does not send when external session is authorized but balance is insufficient', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+
+    const mockProvider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: BigInt(20261019) }),
+      getBalance: vi.fn().mockResolvedValue(BigInt(1000000000000)),
+      getFeeData: vi.fn().mockResolvedValue({
+        gasPrice: BigInt(1000000000),
+        maxFeePerGas: null,
+        maxPriorityFeePerGas: null
+      }),
+      getCode: vi.fn().mockResolvedValue('0x1234'),
+      destroy: vi.fn()
+    };
+    (app as any).rpcProvider = mockProvider;
+    app.rpcConnected = true;
+
+    Object.defineProperty(app, 'activeNetwork', {
+      value: {
+        ...NETWORKS['digevra-local'],
+        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+      },
+      configurable: true
+    });
+
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    app.sessionWallet = {
+      address: '0x3333333333333333333333333333333333333333'
+    } as ReturnType<typeof Wallet.createRandom>;
+    app.sessionAddress = app.sessionWallet.address;
+    app.sessionAutorisee = true;
+    (app as any).unlockedWallet = null;
+    app.adresseDestinataire =
+      '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1.25;
+
+    vi.spyOn(TestBed.inject(NetworkService), 'getTokenBalance').mockResolvedValue({
+      amount: '100',
+      symbol: 'DGV'
+    });
+
+    await app.preparerEnvoi();
+
+    expect(app.messageTransaction).toContain(
+      'Solde natif insuffisant pour les frais de réseau'
+    );
+    expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('does not send when RPC is unavailable', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    app.sessionWallet = {
+      address: '0x3333333333333333333333333333333333333333'
+    } as ReturnType<typeof Wallet.createRandom>;
+    app.sessionAddress = app.sessionWallet.address;
+    app.sessionAutorisee = true;
+    (app as any).unlockedWallet = null;
+    (app as any).rpcProvider = null;
+    app.rpcConnected = false;
+    app.adresseDestinataire =
+      '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1.25;
+    await app.preparerEnvoi();
+
+    expect(app.messageTransaction).toBe(
+      'La connexion RPC du réseau actif n’est pas vérifiée.'
+    );
+    expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('does not send when Chain ID is incorrect', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+
+    const mockProvider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: BigInt(999999) }),
+      getBalance: vi.fn(),
+      getFeeData: vi.fn(),
+      getCode: vi.fn(),
+      destroy: vi.fn()
+    };
+    (app as any).rpcProvider = mockProvider;
+    app.rpcConnected = true;
+
+    Object.defineProperty(app, 'activeNetwork', {
+      value: {
+        ...NETWORKS['digevra-local'],
+        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+      },
+      configurable: true
+    });
+
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    app.sessionWallet = {
+      address: '0x3333333333333333333333333333333333333333'
+    } as ReturnType<typeof Wallet.createRandom>;
+    app.sessionAddress = app.sessionWallet.address;
+    app.sessionAutorisee = true;
+    (app as any).unlockedWallet = null;
+    app.adresseDestinataire =
+      '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1.25;
+    await app.preparerEnvoi();
+
+    expect(app.messageTransaction).toBe(
+      'Le Chain ID RPC ne correspond pas au réseau sélectionné.'
+    );
+    expect(app.rpcConnected).toBe(false);
+    expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('rejects transaction signature message from unauthorized origin', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    app.demandeAutorisationSessionId = 'test-request-id';
+
+    app.recevoirMessageWallet(
+      new MessageEvent('message', {
+        origin: 'http://malicious-site.com',
+        source: window,
+        data: {
+          type: 'DIGEVRA_AUTHORIZE_SESSION_RESULT',
+          requestId: 'test-request-id',
+          authorized: true,
+          sessionAddress: '0x3333333333333333333333333333333333333333'
+        }
+      })
+    );
+
+    expect(app.sessionAutorisee).toBe(false);
     fixture.destroy();
   });
 

@@ -12,6 +12,8 @@ import {
 } from '@angular/common/http';
 import {
   formatEther,
+  parseEther,
+  parseUnits,
   JsonRpcProvider,
   Wallet,
   isAddress
@@ -755,15 +757,25 @@ export class App implements OnInit, OnDestroy {
       return;
     }
 
-    if (this.unlockedWallet) {
-      this.messageTransaction =
-        'Envoi désactivé : le portefeuille local n’est pas intégré à un parcours transactionnel vérifié.';
+    if (!this.walletConnecte || !this.adresseWallet) {
+      this.messageTransaction = 'Le portefeuille doit être connecté.';
       return;
     }
 
-    if (!this.sessionAutorisee) {
+    const portefeuilleLocalDeverrouille =
+      !!this.unlockedWallet &&
+      this.unlockedWallet.address.toLowerCase() ===
+        this.adresseWallet.toLowerCase();
+    const sessionExterneAutorisee =
+      this.sessionAutorisee &&
+      !!this.sessionWallet &&
+      !!this.sessionAddress &&
+      this.sessionAddress.toLowerCase() ===
+        this.sessionAddress.toLowerCase();
+
+    if (!portefeuilleLocalDeverrouille && !sessionExterneAutorisee) {
       this.messageTransaction =
-        'La session doit être autorisée dans DIGEVRA Wallet.';
+        'Aucun portefeuille autorisé pour signer cette transaction. Déverrouillez votre portefeuille local ou autorisez la session dans DIGEVRA Wallet.';
       return;
     }
 
@@ -800,18 +812,90 @@ export class App implements OnInit, OnDestroy {
         );
       }
 
-      if (!this.sessionWallet || !this.sessionAddress || !this.sessionAutorisee) {
-        throw new Error('Une session Smart Wallet vérifiée et autorisée est requise.');
+      // Vérification de session pour signature externe (si pas de wallet local déverrouillé)
+      if (
+        !portefeuilleLocalDeverrouille &&
+        (!this.sessionWallet ||
+          !this.sessionAddress ||
+          !this.sessionAutorisee)
+      ) {
+        throw new Error(
+          'Une session Smart Wallet vérifiée et autorisée est requise.'
+        );
       }
 
+      // Vérification du solde réel et des frais de réseau avant autorisation d'envoi
+      await this.verifierSoldeAvantEnvoi(config);
+
       this.messageTransaction =
-        'Envoi bloqué : le parcours de confirmation et les contrôles d’actif ne sont pas vérifiés.';
+        'Tous les prérequis sont vérifiés. La transaction peut être signée.';
     } catch (error) {
       this.messageTransaction = error instanceof Error
         ? error.message
         : 'Impossible de vérifier les prérequis transactionnels.';
     } finally {
       this.cdr.detectChanges();
+    }
+  }
+
+  private async verifierSoldeAvantEnvoi(config: import('./network-config').NetworkConfig): Promise<void> {
+    const provider = this.rpcProvider;
+    if (!provider) {
+      throw new Error('Le provider RPC n’est pas disponible pour vérifier le solde.');
+    }
+
+    const address = this.adresseWallet;
+    const montantWei = parseEther(this.montantEnvoi.toString());
+
+    // --- Solde de la cryptomonnaie native ---
+    const balanceWei = await provider.getBalance(address);
+
+    // Estimation des frais de gas (transfert simple : 21 000 gas)
+    const feeData = await provider.getFeeData();
+    const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice ?? BigInt(0);
+    const gasLimit = BigInt(21000);
+    const gasCost = gasLimit * gasPrice;
+
+    if (config.nativeCurrency.verified && config.nativeCurrency.symbol === 'ETH') {
+      // Réseau avec cryptomonnaie native vérifiée (ex: ETH sur Sepolia)
+      const totalNeeded = montantWei + gasCost;
+      if (balanceWei < totalNeeded) {
+        throw new Error(
+          `Solde ETH insuffisant : ${formatEther(balanceWei)} ETH disponible, ${formatEther(totalNeeded)} ETH requis (montant + frais de réseau estimés).`
+        );
+      }
+    } else {
+      // Réseau avec token ERC-20 (ex: DGV sur DIGEVRA Local)
+      // 1. Vérifier le solde DGV si un contrat est configuré
+      if (config.dgvTokenAddress) {
+        try {
+          const tokenBalance = await this.networkService.getTokenBalance(
+            provider,
+            config.dgvTokenAddress,
+            address
+          );
+          const dgvBalanceWei = parseUnits(tokenBalance.amount, 18);
+          if (dgvBalanceWei < montantWei) {
+            throw new Error(
+              `Solde DGV insuffisant : ${tokenBalance.amount} DGV disponible, ${this.montantEnvoi} DGV requis.`
+            );
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith('Solde DGV insuffisant')) {
+            throw error;
+          }
+          throw new Error(
+            'Impossible de vérifier le solde DGV sur le contrat configuré.'
+          );
+        }
+      }
+
+      // 2. Vérifier le solde natif pour les frais de gas
+      if (balanceWei < gasCost) {
+        throw new Error(
+          `Solde natif insuffisant pour les frais de réseau : ${formatEther(balanceWei)} disponible, ${formatEther(gasCost)} requis.`
+        );
+      }
     }
   }
 
