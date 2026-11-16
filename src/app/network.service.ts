@@ -3,6 +3,7 @@ import {
   Contract,
   formatEther,
   formatUnits,
+   isAddress,
   JsonRpcProvider
 } from 'ethers';
 import { NetworkConfig } from './network-config';
@@ -53,11 +54,32 @@ export class NetworkService {
   }
 
   async connect(config: NetworkConfig): Promise<VerifiedNetworkConnection> {
-    if (!config.rpcUrl.trim()) {
+    const rpcUrlInput = config.rpcUrl.trim();
+
+    if (!rpcUrlInput) {
       throw new Error(`L’URL RPC de ${config.name} n’est pas configurée.`);
     }
 
-    const provider = new JsonRpcProvider(config.rpcUrl);
+    let rpcUrl: URL;
+
+    try {
+      rpcUrl = new URL(rpcUrlInput);
+    } catch {
+      throw new Error('URL RPC invalide.');
+    }
+
+    if (!['http:', 'https:'].includes(rpcUrl.protocol)) {
+      throw new Error('Le protocole RPC doit être HTTP ou HTTPS.');
+    }
+
+    if (
+      rpcUrl.protocol === 'http:' &&
+      !['localhost', '127.0.0.1', '[::1]'].includes(rpcUrl.hostname)
+    ) {
+      throw new Error('Une connexion RPC distante doit utiliser HTTPS.');
+    }
+
+    const provider = new JsonRpcProvider(rpcUrlInput);
 
     try {
       const network = await provider.getNetwork();
@@ -92,17 +114,30 @@ export class NetworkService {
     tokenAddress: string,
     accountAddress: string
   ): Promise<TokenBalance> {
-    const code = await provider.getCode(tokenAddress);
+    const normalizedTokenAddress = tokenAddress.trim();
+    const normalizedAccountAddress = accountAddress.trim();
+
+    if (!isAddress(normalizedTokenAddress)) {
+      throw new Error('Adresse du contrat DGV invalide.');
+    }
+
+    if (!isAddress(normalizedAccountAddress)) {
+      throw new Error('Adresse du portefeuille invalide.');
+    }
+
+    const code = await provider.getCode(normalizedTokenAddress);
     if (code === '0x') {
       throw new Error('Le contrat DGV configuré n’est pas déployé sur ce réseau.');
     }
 
-    const contract = new Contract(tokenAddress, ERC20_ABI, provider);
-    const [balance, decimals, symbol] = await Promise.all([
-      contract['balanceOf'](accountAddress) as Promise<bigint>,
-      contract['decimals']() as Promise<number>,
+    const contract = new Contract(normalizedTokenAddress, ERC20_ABI, provider);
+    const [balance, decimalsRaw, symbol] = await Promise.all([
+      contract['balanceOf'](normalizedAccountAddress) as Promise<bigint>,
+      contract['decimals']() as Promise<bigint>,
       contract['symbol']() as Promise<string>
     ]);
+
+    const decimals = Number(decimalsRaw);
 
     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
       throw new Error('Le contrat DGV a retourné un nombre de décimales invalide.');
