@@ -24,7 +24,8 @@ import {
   displayRpcEndpoint,
   isNetworkKey,
   NETWORKS,
-  NetworkKey
+  NetworkKey,
+  setRpcUrl
 } from './network-config';
 import { NetworkService } from './network.service';
 
