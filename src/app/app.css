@@ -979,6 +979,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .transfer-modal-card .receive-address { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .transfer-modal-card .receive-address code { overflow-wrap: anywhere; flex: 1 1 220px; }
 .transfer-modal-card .receive-qr { display: block; max-width: min(100%, 240px); height: auto; margin: 18px auto; }
+.transfer-summary { margin-top: 18px; padding: 16px; border: 1px solid rgba(112, 160, 255, .35); border-radius: 14px; background: rgba(15, 30, 59, .8); }
+.transfer-summary h3 { margin: 0 0 12px; font-size: 17px; }
+.transfer-summary p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; margin: 9px 0; color: #cbd6ed; }
+.transfer-summary code { max-width: 100%; overflow-wrap: anywhere; color: #9dc8ff; }
+.transfer-summary strong { color: #f6f8ff; text-align: right; }
+.transfer-summary .confirm-transfer { margin-top: 12px; }
+.activity-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; color: #aebbd2; font-size: 13px; }
+.activity-meta .tx-failed { color: #ff8c9b; }
+.history-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; color: #cbd6ed; }
+.history-pagination button { min-height: 40px; padding: 8px 14px; border: 1px solid #45639a; border-radius: 10px; background: #102449; color: #f6f8ff; }
+.history-pagination button:disabled { opacity: .5; cursor: not-allowed; }
+.v3-tx-copy { min-width: 0; display: grid; gap: 3px; }
+.v3-tx-value { border: 0; background: transparent; color: #f6f8ff; font: inherit; font-weight: 700; cursor: pointer; }
 .modal-close { position: absolute; right: 14px; top: 10px; border: 0; background: transparent;
   color: #fff; font-size: 28px; }
 @media (min-width: 1101px) {
@@ -1113,6 +1126,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .v3-icon-button{border:1px solid #4b365d;border-radius:13px;background:#1b1528;color:#e5d3ff;padding:11px 14px}
 .v3-content{max-width:1380px}
 .v3-heading{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:24px}
+.v3-heading>.explorer-button{margin-left:auto;white-space:nowrap}
 .v3-heading h1{font-size:clamp(29px,3.2vw,43px);margin:4px 0 6px}
 .v3-eyebrow{color:#b881fc;letter-spacing:.17em;font-size:11px;font-weight:800;margin:0}
 .v3-muted{color:#a9a0b9;margin:0}
@@ -1142,6 +1156,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .v3-actions{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:18px 0}
 .v3-action{background:#161221;border:1px solid #3b2b4b;border-radius:20px;color:#fff;min-height:142px;padding:22px;display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:7px;transition:border-color .2s,transform .2s}
 .v3-action:hover{border-color:#a452f4;transform:translateY(-2px)}
+.v3-action:disabled{opacity:.55;cursor:not-allowed;transform:none;border-color:#393446}
 .v3-action-icon{display:grid;place-items:center;background:#40205b;color:#e5b8ff;border-radius:15px;width:42px;height:42px;font-size:28px}
 .v3-action strong{font-size:19px}.v3-action small{color:#a69bb8;font-size:12px}
 .v3-recent,.v3-network{padding:23px}
@@ -1175,7 +1190,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
  .v3-topbar .network-pill strong{font-size:11px}
  .v3-topbar .network-pill small{font-size:9px}
  .v3-header-actions>.v3-icon-button{display:none}
- .v3-heading{margin-bottom:18px;align-items:flex-start}
+ .v3-heading{margin-bottom:18px;align-items:flex-start;flex-wrap:wrap}
+ .v3-heading>.explorer-button{margin-left:0}
  .v3-heading h1{font-size:29px}.v3-heading .v3-muted{font-size:13px}
  .v3-test-badge{display:none}
  .v3-account{padding:13px;gap:9px;border-radius:19px;margin-bottom:17px}

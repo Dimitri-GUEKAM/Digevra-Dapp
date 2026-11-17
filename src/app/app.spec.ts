@@ -3,12 +3,38 @@ import { Wallet } from 'ethers';
 import { App } from './app';
 import { NetworkService } from './network.service';
 import { NETWORKS } from './network-config';
+import { IndexerService } from './indexer.service';
+import type { IndexedTransaction } from './indexer.service';
 import { vi } from 'vitest';
 
 describe('App', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [App],
+      providers: [{
+        provide: NetworkService,
+        useValue: {
+          connect: vi.fn().mockRejectedValue(new Error('RPC unavailable')),
+          getNativeBalance: vi.fn(),
+          getTokenBalance: vi.fn(),
+          destroy: vi.fn()
+        }
+      }, {
+        provide: IndexerService,
+        useValue: {
+          getAddressTransactions: vi.fn().mockResolvedValue({
+            items: [],
+            pagination: { limit: 10, offset: 0, total: 0, hasMore: false },
+            indexer: {
+              state: 'ready',
+              startBlock: 0,
+              lastIndexedBlock: 100,
+              chainHead: 100,
+              historyComplete: true
+            }
+          })
+        }
+      }]
     })
       .compileComponents();
   });
@@ -29,6 +55,165 @@ describe('App', () => {
     expect(compiled.querySelector('.welcome-screen')).toBeNull();
     expect(compiled.querySelectorAll('.auth-options button')).toHaveLength(3);
     expect(compiled.querySelector('.auth-back')).toBeNull();
+    fixture.destroy();
+  });
+
+  it('opens the configured local Explorer from the Wallet', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+
+    app.ouvrirExplorer();
+
+    expect(open).toHaveBeenCalledWith(
+      'http://localhost:4201/#/',
+      '_blank',
+      'noopener,noreferrer'
+    );
+    fixture.destroy();
+  });
+
+  it('opens transaction, block, and address links using the Explorer hash routes', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+
+    app.ouvrirTransaction(`0x${'a'.repeat(64)}`);
+    app.ouvrirBloc(27640);
+    app.ouvrirAdresse('0x1111111111111111111111111111111111111111');
+
+    expect(open).toHaveBeenNthCalledWith(
+      1,
+      `http://localhost:4201/#/transaction/0x${'a'.repeat(64)}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+    expect(open).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:4201/#/block/27640',
+      '_blank',
+      'noopener,noreferrer'
+    );
+    expect(open).toHaveBeenNthCalledWith(
+      3,
+      'http://localhost:4201/#/address/0x1111111111111111111111111111111111111111',
+      '_blank',
+      'noopener,noreferrer'
+    );
+    fixture.destroy();
+  });
+
+  it('loads the active wallet history page and exposes indexer completeness', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const address = '0x1111111111111111111111111111111111111111';
+    const getAddressTransactions = vi.mocked(
+      TestBed.inject(IndexerService).getAddressTransactions
+    );
+    getAddressTransactions.mockResolvedValue({
+      items: [],
+      pagination: { limit: 10, offset: 20, total: 25, hasMore: true },
+      indexer: {
+        state: 'ready',
+        startBlock: 0,
+        lastIndexedBlock: 125,
+        chainHead: 125,
+        historyComplete: true
+      }
+    });
+    app.adresseWallet = address;
+
+    await app.chargerHistorique(2);
+
+    expect(getAddressTransactions).toHaveBeenCalledWith(address, 10, 20);
+    expect(app.transactionsPage).toBe(2);
+    expect(app.transactionsTotal).toBe(25);
+    expect(app.transactionsState).toBe('ready');
+    expect(app.transactionsIndexedThrough).toBe(125);
+    expect(app.transactionsHistoryComplete).toBe(true);
+    expect(app.transactionsLoading).toBe(false);
+    fixture.destroy();
+  });
+
+  it('loads the next history page when pagination is requested', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const address = '0x1111111111111111111111111111111111111111';
+    const getAddressTransactions = vi.mocked(
+      TestBed.inject(IndexerService).getAddressTransactions
+    );
+    getAddressTransactions.mockResolvedValue({
+      items: [],
+      pagination: { limit: 10, offset: 10, total: 25, hasMore: true },
+      indexer: {
+        state: 'ready',
+        startBlock: 0,
+        lastIndexedBlock: 125,
+        chainHead: 125,
+        historyComplete: true
+      }
+    });
+    app.adresseWallet = address;
+    app.transactionsTotal = 25;
+
+    app.pageHistorique(1);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getAddressTransactions).toHaveBeenCalledWith(address, 10, 10);
+    expect(app.transactionsPage).toBe(1);
+    fixture.destroy();
+  });
+
+  it('renders indexed wallet transactions in the recent activity panel', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    app.transactions = [{
+      hash: `0x${'a'.repeat(64)}`,
+      blockNumber: 123,
+      transactionIndex: 0,
+      from: app.adresseWallet,
+      to: '0x2222222222222222222222222222222222222222',
+      valueWei: '10000000000000000',
+      valueDgv: '0.01',
+      gasUsed: '21000',
+      effectiveGasPriceWei: '1000',
+      feeWei: '21000000',
+      feeDgv: '0.000000000021',
+      status: 1,
+      timestamp: 1_700_000_000
+    } satisfies IndexedTransaction];
+
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const recent = fixture.nativeElement.querySelector('.v3-recent') as HTMLElement;
+    expect(recent.querySelectorAll('.v3-tx')).toHaveLength(1);
+    expect(recent.textContent).toContain('Envoi');
+    expect(recent.textContent).toContain('-0.01 DGV');
+    expect(recent.textContent).toContain('bloc 123');
+    expect(recent.textContent).toContain('Frais : 0.000000000021 DGV');
+    fixture.destroy();
+  });
+
+  it('reports an indexer failure instead of presenting it as an empty history', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    vi.mocked(TestBed.inject(IndexerService).getAddressTransactions)
+      .mockRejectedValue(new Error('Indexer unavailable.'));
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    app.transactionsHistoryComplete = true;
+
+    await app.chargerHistorique();
+
+    expect(app.transactionsError).toBe('Indexer unavailable.');
+    expect(app.transactionsState).toBe('degraded');
+    expect(app.transactionsHistoryComplete).toBe(false);
+    expect(app.transactions).toEqual([]);
+    expect(app.transactionsLoading).toBe(false);
     fixture.destroy();
   });
 
@@ -90,7 +275,7 @@ describe('App', () => {
     const postMessage = vi.spyOn(window, 'postMessage');
     const chargerWallet = vi
       .spyOn(app, 'chargerWallet')
-      .mockImplementation(() => {});
+      .mockResolvedValue();
     vi.spyOn(window, 'open').mockReturnValue(window);
     app.ouvrirWallet();
 
@@ -235,7 +420,7 @@ describe('App', () => {
     await app.preparerEnvoi();
 
     expect(app.messageTransaction).toContain(
-      'Aucun portefeuille autorisé pour signer cette transaction'
+      'Déverrouillez localement le portefeuille qui détient les DGV'
     );
     expect(request).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
@@ -286,7 +471,8 @@ describe('App', () => {
         maxFeePerGas: null,
         maxPriorityFeePerGas: null
       }),
-      getCode: vi.fn().mockResolvedValue('0x1234'),
+      getCode: vi.fn().mockResolvedValue('0x'),
+      estimateGas: vi.fn().mockResolvedValue(21_000n),
       destroy: vi.fn()
     };
     (app as any).rpcProvider = mockProvider;
@@ -295,8 +481,8 @@ describe('App', () => {
     Object.defineProperty(app, 'activeNetwork', {
       value: {
         ...NETWORKS['digevra-local'],
-        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
-        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+        dgvTokenAddress: null,
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency }
       },
       configurable: true
     });
@@ -319,7 +505,7 @@ describe('App', () => {
     await app.preparerEnvoi();
 
     expect(app.messageTransaction).toContain(
-      'Solde natif insuffisant pour les frais de réseau'
+      'Solde DGV insuffisant'
     );
     expect(app.transactionEnCours).toBe(false);
     fixture.destroy();
@@ -337,7 +523,8 @@ describe('App', () => {
         maxFeePerGas: null,
         maxPriorityFeePerGas: null
       }),
-      getCode: vi.fn().mockResolvedValue('0x1234'),
+      getCode: vi.fn().mockResolvedValue('0x'),
+      estimateGas: vi.fn().mockResolvedValue(21_000n),
       destroy: vi.fn()
     };
     (app as any).rpcProvider = mockProvider;
@@ -346,8 +533,8 @@ describe('App', () => {
     Object.defineProperty(app, 'activeNetwork', {
       value: {
         ...NETWORKS['digevra-local'],
-        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
-        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+        dgvTokenAddress: null,
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency }
       },
       configurable: true
     });
@@ -370,9 +557,10 @@ describe('App', () => {
     await app.preparerEnvoi();
 
     expect(app.messageTransaction).toContain(
-      'Tous les prérequis sont vérifiés'
+      'Transfert vérifié'
     );
     expect(app.transactionEnCours).toBe(false);
+    expect(app.preparedTransfer?.amountDgv).toBe('1.25');
     fixture.destroy();
   });
 
@@ -396,7 +584,7 @@ describe('App', () => {
     await app.preparerEnvoi();
 
     expect(app.messageTransaction).toContain(
-      'Aucun portefeuille autorisé pour signer cette transaction'
+      'Déverrouillez localement le portefeuille qui détient les DGV'
     );
     expect(request).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
@@ -404,7 +592,7 @@ describe('App', () => {
     fixture.destroy();
   });
 
-  it('sends when external session is authorized and balance is sufficient', async () => {
+  it('does not let an authorized session sign for the EOA holding DGV', async () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
 
@@ -416,7 +604,8 @@ describe('App', () => {
         maxFeePerGas: null,
         maxPriorityFeePerGas: null
       }),
-      getCode: vi.fn().mockResolvedValue('0x1234'),
+      getCode: vi.fn().mockResolvedValue('0x'),
+      estimateGas: vi.fn().mockResolvedValue(21_000n),
       destroy: vi.fn()
     };
     (app as any).rpcProvider = mockProvider;
@@ -425,8 +614,8 @@ describe('App', () => {
     Object.defineProperty(app, 'activeNetwork', {
       value: {
         ...NETWORKS['digevra-local'],
-        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
-        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+        dgvTokenAddress: null,
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency }
       },
       configurable: true
     });
@@ -450,9 +639,7 @@ describe('App', () => {
 
     await app.preparerEnvoi();
 
-    expect(app.messageTransaction).toContain(
-      'Tous les prérequis sont vérifiés'
-    );
+    expect(app.messageTransaction).toContain('Déverrouillez localement');
     expect(app.transactionEnCours).toBe(false);
     fixture.destroy();
   });
@@ -469,7 +656,8 @@ describe('App', () => {
         maxFeePerGas: null,
         maxPriorityFeePerGas: null
       }),
-      getCode: vi.fn().mockResolvedValue('0x1234'),
+      getCode: vi.fn().mockResolvedValue('0x'),
+      estimateGas: vi.fn().mockResolvedValue(21_000n),
       destroy: vi.fn()
     };
     (app as any).rpcProvider = mockProvider;
@@ -478,8 +666,8 @@ describe('App', () => {
     Object.defineProperty(app, 'activeNetwork', {
       value: {
         ...NETWORKS['digevra-local'],
-        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
-        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+        dgvTokenAddress: null,
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency }
       },
       configurable: true
     });
@@ -503,9 +691,7 @@ describe('App', () => {
 
     await app.preparerEnvoi();
 
-    expect(app.messageTransaction).toContain(
-      'Solde natif insuffisant pour les frais de réseau'
-    );
+    expect(app.messageTransaction).toContain('Déverrouillez localement');
     expect(app.transactionEnCours).toBe(false);
     fixture.destroy();
   });
@@ -516,12 +702,9 @@ describe('App', () => {
 
     app.walletConnecte = true;
     app.adresseWallet = '0x1111111111111111111111111111111111111111';
-    app.sessionWallet = {
-      address: '0x3333333333333333333333333333333333333333'
-    } as ReturnType<typeof Wallet.createRandom>;
-    app.sessionAddress = app.sessionWallet.address;
-    app.sessionAutorisee = true;
-    (app as any).unlockedWallet = null;
+    (app as any).unlockedWallet = {
+      address: '0x1111111111111111111111111111111111111111'
+    } as any;
     (app as any).rpcProvider = null;
     app.rpcConnected = false;
     app.adresseDestinataire =
@@ -544,7 +727,7 @@ describe('App', () => {
       getNetwork: vi.fn().mockResolvedValue({ chainId: BigInt(999999) }),
       getBalance: vi.fn(),
       getFeeData: vi.fn(),
-      getCode: vi.fn(),
+      getCode: vi.fn().mockResolvedValue('0x'),
       destroy: vi.fn()
     };
     (app as any).rpcProvider = mockProvider;
@@ -553,20 +736,17 @@ describe('App', () => {
     Object.defineProperty(app, 'activeNetwork', {
       value: {
         ...NETWORKS['digevra-local'],
-        dgvTokenAddress: '0x0000000000000000000000000000000000000001',
-        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency, verified: true }
+        dgvTokenAddress: null,
+        nativeCurrency: { ...NETWORKS['digevra-local'].nativeCurrency }
       },
       configurable: true
     });
 
     app.walletConnecte = true;
     app.adresseWallet = '0x1111111111111111111111111111111111111111';
-    app.sessionWallet = {
-      address: '0x3333333333333333333333333333333333333333'
-    } as ReturnType<typeof Wallet.createRandom>;
-    app.sessionAddress = app.sessionWallet.address;
-    app.sessionAutorisee = true;
-    (app as any).unlockedWallet = null;
+    (app as any).unlockedWallet = {
+      address: '0x1111111111111111111111111111111111111111'
+    } as any;
     app.adresseDestinataire =
       '0x2222222222222222222222222222222222222222';
     app.montantEnvoi = 1.25;
@@ -577,6 +757,157 @@ describe('App', () => {
     );
     expect(app.rpcConnected).toBe(false);
     expect(app.transactionEnCours).toBe(false);
+    fixture.destroy();
+  });
+
+  it('refuses a classic native transfer from a Smart Contract Wallet', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const provider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: 20261019n }),
+      getCode: vi.fn().mockResolvedValue('0x60006000'),
+      getBalance: vi.fn(),
+      getFeeData: vi.fn(),
+      estimateGas: vi.fn(),
+      destroy: vi.fn()
+    };
+    (app as any).rpcProvider = provider;
+    app.rpcConnected = true;
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+    (app as any).unlockedWallet = {
+      address: app.adresseWallet
+    } as any;
+    app.adresseDestinataire = '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1;
+
+    await app.preparerEnvoi();
+
+    expect(app.messageTransaction).toContain('Cette adresse est un Smart Contract Wallet');
+    expect(provider.getBalance).not.toHaveBeenCalled();
+    expect(app.preparedTransfer).toBeNull();
+    fixture.destroy();
+  });
+
+  it('requires explicit confirmation, sends a native value transaction, and refreshes the balance', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const txHash = `0x${'a'.repeat(64)}`;
+    const sendTransaction = vi.fn().mockResolvedValue({
+      hash: txHash,
+      wait: vi.fn().mockResolvedValue({ status: 1, blockNumber: 145 })
+    });
+    const provider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: 20261019n }),
+      getCode: vi.fn().mockResolvedValue('0x'),
+      getBalance: vi.fn().mockResolvedValue(100n * 10n ** 18n),
+      getFeeData: vi.fn().mockResolvedValue({
+        gasPrice: 1_000_000_000n,
+        maxFeePerGas: null,
+        maxPriorityFeePerGas: null
+      }),
+      estimateGas: vi.fn().mockResolvedValue(21_000n),
+      destroy: vi.fn()
+    };
+    const signer = {
+      address: '0x1111111111111111111111111111111111111111',
+      connect: vi.fn(() => ({ sendTransaction }))
+    };
+    (app as any).rpcProvider = provider;
+    (app as any).unlockedWallet = signer;
+    app.rpcConnected = true;
+    app.walletConnecte = true;
+    app.adresseWallet = signer.address;
+    app.adresseDestinataire = '0x2222222222222222222222222222222222222222';
+    app.montantEnvoi = 1.25;
+    vi.spyOn(TestBed.inject(NetworkService), 'getNativeBalance')
+      .mockResolvedValue('98.7499748');
+
+    await app.preparerEnvoi();
+
+    expect(app.preparedTransfer?.amountDgv).toBe('1.25');
+    expect(app.preparedTransfer?.estimatedFeeDgv).toBe('0.0000252');
+    expect(sendTransaction).not.toHaveBeenCalled();
+
+    await app.confirmerEtEnvoyer();
+
+    expect(sendTransaction).toHaveBeenCalledOnce();
+    expect(sendTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      to: '0x2222222222222222222222222222222222222222',
+      value: 1_250_000_000_000_000_000n,
+      chainId: 20261019n
+    }));
+    expect(app.dernierHashTransaction).toBe(txHash);
+    expect(app.messageTransaction).toContain(`Transaction confirmée : ${txHash}`);
+    expect(app.soldeDgvDisplay).toBe('98.7499748');
+    expect(app.preparedTransfer).toBeNull();
+    fixture.destroy();
+  });
+
+  it('switches the active network only after its configured chain is verified', async () => {
+    const networkService = TestBed.inject(NetworkService);
+    const provider = {
+      getNetwork: vi.fn(),
+      getBlockNumber: vi.fn(),
+      getCode: vi.fn(),
+      destroy: vi.fn()
+    };
+    vi.spyOn(networkService, 'connect').mockImplementation(async (config) => ({
+      provider: provider as never,
+      chainId: config.chainId,
+      blockNumber: 52,
+      smartWalletDeployed: false
+    }));
+
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const app = fixture.componentInstance;
+
+    await app.changerReseau('ethereum-sepolia');
+
+    expect(app.activeNetworkKey).toBe('ethereum-sepolia');
+    expect(app.rpcConnected).toBe(true);
+    expect(app.actualChainId).toBe(NETWORKS['ethereum-sepolia'].chainId);
+    expect(app.dernierBloc).toBe(52);
+    fixture.destroy();
+  });
+
+  it('refreshes real native balances and displays zero exactly as 0 DGV', async () => {
+    localStorage.removeItem('digevra_connected_address');
+    const networkService = TestBed.inject(NetworkService);
+    const provider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: 20261019n }),
+      getBlockNumber: vi.fn().mockResolvedValue(128),
+      getCode: vi.fn().mockResolvedValue('0x'),
+      destroy: vi.fn()
+    };
+    vi.spyOn(networkService, 'connect').mockResolvedValue({
+      provider: provider as never,
+      chainId: 20261019,
+      blockNumber: 127,
+      smartWalletDeployed: false
+    });
+    vi.spyOn(networkService, 'getNativeBalance')
+      .mockResolvedValueOnce('1.234567890123456789')
+      .mockResolvedValueOnce('0');
+
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const app = fixture.componentInstance;
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+
+    await app.actualiserSolde();
+    expect(app.soldeDgvDisplay).toBe('1.234567890123456789');
+    expect(app.soldeDgvSymbol).toBe('DGV');
+
+    await app.actualiserSolde();
+    fixture.detectChanges();
+    expect(app.soldeDgvDisplay).toBe('0');
+    expect(fixture.nativeElement.textContent).toContain('0 DGV');
+    expect(app.rpcConnected).toBe(true);
     fixture.destroy();
   });
 
@@ -612,7 +943,7 @@ describe('App', () => {
     const app = fixture.componentInstance;
     const chargerWallet = vi
       .spyOn(app, 'chargerWallet')
-      .mockImplementation(() => {});
+      .mockResolvedValue();
 
     fixture.detectChanges();
 

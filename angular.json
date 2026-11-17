@@ -60,7 +60,8 @@
               "buildTarget": "dapp-frontend:build:production"
             },
             "development": {
-              "buildTarget": "dapp-frontend:build:development"
+              "buildTarget": "dapp-frontend:build:development",
+              "proxyConfig": "proxy.conf.cjs"
             }
           },
           "defaultConfiguration": "development"

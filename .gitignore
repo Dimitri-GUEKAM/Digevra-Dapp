@@ -34,6 +34,7 @@ yarn-error.log
 .sass-cache/
 /connect.lock
 /coverage
+.tsupgrader/
 /libpeerconnection.log
 testem.log
 /typings
@@ -50,10 +51,14 @@ Thumbs.db
 *.pem
 *.key
 *.keystore
+*keystore*.json
 *.secret
 
 # Angular build cache
 /.angular/
+
+# Local blockchain indexer database
+/indexer/data/
 
 # DIGEVRA - Wallet data (local, never committed)
 digevra_vault_v1

@@ -32,11 +32,30 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build DIGEVRA
-        run: npx ng build --configuration production --base-href /Digevra-Dapp/
+      - name: Type-check tests
+        run: npx tsc -p tsconfig.spec.json --noEmit
+
+      - name: Test Angular Wallet
+        run: npm test -- --watch=false
+
+      - name: Test Explorer
+        run: npm run test:explorer
+
+      - name: Test blockchain indexer
+        run: npm run test:indexer
+
+      - name: Build Wallet and prepare Pages artifact
+        run: npm run build:pages
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+
+      - name: Verify published application files
+        run: |
+          test -f dist/dapp-frontend/browser/index.html
+          test -f dist/dapp-frontend/browser/digevra-config.js
+          test -f dist/dapp-frontend/browser/explorer/index.html
+          test -f dist/dapp-frontend/browser/explorer/explorer.js
 
       - name: Upload website
         uses: actions/upload-pages-artifact@v3

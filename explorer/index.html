@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090d18">
+  <meta name="description" content="Explorateur local de la blockchain DIGEVRA.">
+  <title>DIGEVRA Explorer</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="../digevra-config.js"></script>
+  <script type="module" src="./explorer.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="#/" aria-label="DIGEVRA Explorer, accueil">
+        <span class="brand-mark">D</span>
+        <span><strong>DIGEVRA</strong><small>BLOCKCHAIN EXPLORER</small></span>
+      </a>
+      <nav class="main-nav" aria-label="Navigation principale">
+        <a href="#/">Vue d’ensemble</a>
+        <a href="#/blocks">Blocs</a>
+        <a href="#/transactions">Transactions</a>
+      </nav>
+      <a class="wallet-link" id="wallet-link" href="#" target="_blank" rel="noopener noreferrer">Ouvrir le Wallet ↗</a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">EXPLORATEUR DE CHAÎNE · QBFT</p>
+          <h1>La blockchain DIGEVRA,<br><span>en toute transparence.</span></h1>
+          <p class="hero-copy">Consultez les blocs, les transactions natives et l’activité des adresses à partir des données indexées.</p>
+        </div>
+        <div class="network-badge"><span class="live-dot"></span><span><strong>DIGEVRA Local</strong><small>Chain ID 20261019</small></span></div>
+      </section>
+
+      <form class="search" id="search-form" role="search">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="search-input" type="search" autocomplete="off" placeholder="Rechercher un hash de transaction, hash de bloc, numéro ou adresse" aria-label="Recherche blockchain">
+        <button type="submit">Rechercher</button>
+      </form>
+
+      <div id="global-message" class="message" role="status" hidden></div>
+      <section id="content" aria-live="polite"></section>
+    </main>
+    <footer><span>DIGEVRA Local · Chain ID 20261019</span><span>Lecture seule · Données servies par l’indexeur local</span></footer>
+  </div>
+</body>
+</html>

@@ -66,22 +66,57 @@
       <button [class.active]="vueActive === 'parametres'" (click)="ouvrirParametres()">⚙ Paramètres</button>
     </nav>
     <div class="v3-header-actions">
-      <div class="network-pill" role="status"><span class="status-dot" [class.offline]="!reseauEnLigne"></span><div><strong>{{ nomReseau }}</strong><small>{{ reseauEnLigne ? 'Backend accessible' : 'Connexion non vérifiée' }} · ID {{ chainId }}</small></div></div>
+      <div class="network-pill" role="status"><span class="status-dot" [class.offline]="!reseauEnLigne"></span><div><strong>{{ nomReseau }}</strong><small>{{ reseauEnLigne ? 'RPC connecté' : 'RPC déconnecté' }} · Chain ID {{ actualChainId ?? '—' }}</small></div></div>
       <button type="button" class="v3-icon-button" (click)="ouvrirParametres()" aria-label="Paramètres">⚙</button>
     </div>
   </header>
 
   <main *ngIf="vueActive === 'wallet'" class="content v3-content">
-    <div class="v3-heading"><div><p class="v3-eyebrow">VOTRE ESPACE DIGEVRA</p><h1>Tableau de bord</h1><p class="v3-muted">Gérez votre portefeuille et consultez son activité.</p></div><span class="v3-test-badge">{{ nomReseau }}</span></div>
+    <div class="v3-heading"><div><p class="v3-eyebrow">VOTRE ESPACE DIGEVRA</p><h1>Tableau de bord</h1><p class="v3-muted">Gérez votre portefeuille et consultez son activité.</p></div><span class="v3-test-badge">{{ nomReseau }}</span><button type="button" class="explorer-button" [disabled]="networkSwitchInProgress || balanceLoading" (click)="actualiserSolde()" aria-label="Actualiser le solde et l’état du réseau">Actualiser</button></div>
+    <p class="v3-network-warning" role="status" *ngIf="modeDemonstration">Mode démonstration : aucun RPC ni indexeur HTTPS n’est configuré. Les soldes et l’historique réels sont indisponibles, et les envois sont désactivés.</p>
     <section class="v3-account card" aria-label="Compte actif"><div class="v3-avatar">W1</div><div class="v3-account-copy"><strong>Portefeuille principal</strong><span>{{ raccourcirAdresse(adresseWallet) }}</span></div><span class="v3-account-tag">Actif</span><button type="button" class="v3-icon-button" (click)="copierAdresse()" aria-label="Copier l'adresse">⧉</button></section>
     <p class="v3-inline-note" *ngIf="messageCopie">{{ messageCopie }}</p>
     <div class="v3-layout">
       <div class="v3-primary-column">
-        <section class="v3-balance card"><div class="v3-token-header"><div class="v3-token-icon">DGV</div><div><strong>DIGEVRA</strong><span>Solde communiqué par le backend DIGEVRA</span></div><span class="v3-chevron">›</span></div><div class="v3-balance-caption">SOLDE DISPONIBLE</div><div class="v3-balance-number" *ngIf="reseauEnLigne; else v3Unavailable">{{ soldeDgv | number:'1.2-6' }} <small>DGV</small></div><ng-template #v3Unavailable><div class="v3-balance-number v3-balance-unavailable">Indisponible</div></ng-template><div class="v3-balance-footer">Aucune conversion USD non vérifiée</div></section>
-        <div class="v3-actions"><button type="button" class="v3-action" (click)="ouvrirEnvoi()"><span class="v3-action-icon">↑</span><strong>Envoyer</strong><small>Transférer des DGV</small></button><button type="button" class="v3-action" (click)="ouvrirReception()"><span class="v3-action-icon">↓</span><strong>Recevoir</strong><small>Adresse et QR code</small></button></div>
-        <section class="card v3-recent"><div class="v3-section-heading"><h2>Transactions récentes</h2><button type="button" (click)="ouvrirActivite()">Voir tout →</button></div><p class="v3-empty" *ngIf="transactions.length === 0">Aucune transaction à afficher.</p><div class="v3-tx" *ngFor="let tx of transactions | slice:0:4"><span class="v3-tx-icon">{{ estEnvoyee(tx) ? '↑' : '↓' }}</span><div><strong>{{ estEnvoyee(tx) ? 'Envoi' : 'Réception' }}</strong><small>{{ raccourcirAdresse(estEnvoyee(tx) ? (tx.to ?? tx.toAddress) : (tx.from ?? tx.fromAddress)) }}</small></div><strong>{{ estEnvoyee(tx) ? '-' : '+' }}{{ obtenirMontant(tx) | number:'1.2-6' }} DGV</strong></div></section>
+        <section class="v3-balance card"><div class="v3-token-header"><div class="v3-token-icon">DGV</div><div><strong>DIGEVRA</strong><span>Solde lu depuis le RPC du réseau sélectionné</span></div><span class="v3-chevron">›</span></div><div class="v3-balance-caption">SOLDE DISPONIBLE</div><div class="v3-balance-number" *ngIf="balanceLoading; else v3BalanceValue">Actualisation…</div><ng-template #v3BalanceValue><div class="v3-balance-number" *ngIf="rpcConnected && soldeDgvDisplay !== '—'; else v3Unavailable">{{ soldeDgvDisplay }} <small>{{ soldeDgvSymbol }}</small></div></ng-template><ng-template #v3Unavailable><div class="v3-balance-number v3-balance-unavailable">{{ rpcConnected ? (soldeDgvMessage || 'Solde non configuré sur ce réseau') : 'Solde indisponible — réseau déconnecté' }}</div></ng-template><div class="v3-balance-footer" *ngIf="soldeDgvMessage && rpcConnected">{{ soldeDgvMessage }}</div><div class="v3-balance-footer" *ngIf="!soldeDgvMessage">Aucune conversion USD non vérifiée</div></section>
+        <div class="v3-actions"><button type="button" class="v3-action" [disabled]="modeDemonstration || !rpcConnected" (click)="ouvrirEnvoi()"><span class="v3-action-icon">↑</span><strong>Envoyer</strong><small>{{ modeDemonstration ? 'Désactivé en démonstration' : 'Transférer des DGV' }}</small></button><button type="button" class="v3-action" (click)="ouvrirReception()"><span class="v3-action-icon">↓</span><strong>Recevoir</strong><small>Adresse et QR code</small></button></div>
+        <section class="card v3-recent">
+          <div class="v3-section-heading">
+            <h2>Transactions récentes</h2>
+            <button type="button" (click)="ouvrirActivite()">Voir tout →</button>
+          </div>
+          <p class="v3-empty" *ngIf="transactionsLoading">Chargement de l’historique indexé…</p>
+          <p class="v3-empty" *ngIf="transactionsError">Historique indisponible : {{ transactionsError }}</p>
+          <p class="v3-empty" *ngIf="transactionsState === 'syncing'">
+            Indexation en cours jusqu’au bloc {{ transactionsIndexedThrough ?? '—' }}.
+            Les résultats ne sont pas encore exhaustifs.
+          </p>
+          <p class="v3-empty" *ngIf="transactionsState === 'ready' && !transactionsHistoryComplete">
+            Indexation prête, mais historique partiel depuis le bloc configuré.
+          </p>
+          <p class="v3-empty" *ngIf="transactionsState === 'starting'">
+            L’indexeur démarre; aucun historique exhaustif n’est encore disponible.
+          </p>
+          <p class="v3-empty" *ngIf="!transactionsLoading && !transactionsError && transactions.length === 0 && transactionsHistoryComplete">
+            Aucune transaction native indexée pour cette adresse jusqu’au bloc {{ transactionsIndexedThrough }}.
+          </p>
+          <p class="v3-empty" *ngIf="!transactionsLoading && !transactionsError && transactionsState === 'idle'">
+            Historique non chargé.
+          </p>
+          <div class="v3-tx" *ngFor="let tx of transactions | slice:0:4">
+            <span class="v3-tx-icon">{{ estEnvoyee(tx) ? '↑' : '↓' }}</span>
+            <div class="v3-tx-copy">
+              <strong>{{ estEnvoyee(tx) ? 'Envoi' : 'Réception' }}</strong>
+              <small>{{ raccourcirAdresse(estEnvoyee(tx) ? tx.to : tx.from) }} · bloc {{ tx.blockNumber }}</small>
+              <small>Frais : {{ tx.feeDgv }} DGV · {{ tx.status === 1 ? 'Confirmée' : 'Échouée' }}</small>
+            </div>
+            <button type="button" class="v3-tx-value" (click)="ouvrirTransaction(tx.hash)">
+              {{ estEnvoyee(tx) ? '-' : '+' }}{{ tx.valueDgv }} DGV
+            </button>
+          </div>
+        </section>
       </div>
-      <aside class="v3-secondary-column"><section class="card v3-network"><div class="v3-section-heading"><h2>Réseau actif</h2><span [class.v3-offline]="!reseauEnLigne" class="v3-status">{{ reseauEnLigne ? 'Backend en ligne' : 'Hors ligne' }}</span></div><div class="v3-network-title"><span class="v3-network-symbol">◈</span><div><strong>{{ nomReseau }}</strong><small>Chain ID {{ chainId }}</small></div></div><div class="network-row"><span>Consensus déclaré</span><strong>{{ consensus }}</strong></div><div class="network-row"><span>Dernier bloc</span><button class="network-link" (click)="ouvrirBloc(dernierBloc)">{{ dernierBloc }}</button></div><div class="network-row"><span>Transactions</span><strong>{{ totalTransactions }}</strong></div><p class="v3-network-warning">Sepolia (ID 11155111) n'est pas configuré dans les fichiers transmis. Ne pas envoyer de fonds Sepolia via ce backend.</p><button class="explorer-button" (click)="ouvrirExplorer()">Ouvrir DIGEVRA Explorer ↗</button></section></aside>
+      <aside class="v3-secondary-column"><section class="card v3-network"><div class="v3-section-heading"><h2>Réseau actif</h2><span [class.v3-offline]="!reseauEnLigne" class="v3-status">{{ reseauEnLigne ? 'RPC connecté' : 'RPC déconnecté' }}</span></div><div class="v3-network-title"><span class="v3-network-symbol">◈</span><div><strong>{{ nomReseau }}</strong><small>Chain ID configuré {{ chainId }} · réel {{ actualChainId ?? 'non vérifié' }}</small></div></div><div class="network-row"><span>Endpoint utilisé</span><code>{{ rpcEndpointDisplay }}</code></div><div class="network-row"><span>Consensus déclaré</span><strong>{{ consensus }}</strong></div><div class="network-row"><span>Dernier bloc</span><button class="network-link" [disabled]="!rpcConnected" (click)="ouvrirBloc(dernierBloc)">{{ rpcConnected ? dernierBloc : '—' }}</button></div><div class="network-row"><span>Transactions indexées (wallet)</span><strong>{{ transactionsTotal }}</strong></div><div class="network-row"><span>Indexeur</span><strong>{{ transactionsState }}</strong></div><div class="network-row" *ngIf="transactionsIndexedThrough !== null"><span>Indexé jusqu’au bloc</span><strong>{{ transactionsIndexedThrough }}</strong></div><p class="v3-network-warning" *ngIf="transactionsError">Indexeur indisponible : {{ transactionsError }}</p><p class="v3-network-warning" *ngIf="!transactionsHistoryComplete && !transactionsError">L’exhaustivité de l’historique dépend de la synchronisation depuis le bloc genesis.</p><p class="v3-network-warning">Sepolia n'est pas configuré. Ne pas y envoyer de fonds.</p><button class="explorer-button" [disabled]="!explorerUrl" (click)="ouvrirExplorer()">Ouvrir DIGEVRA Explorer ↗</button></section></aside>
     </div>
   </main>
 
@@ -102,7 +137,7 @@
         </h1>
 
         <p>
-          Historique complet de votre wallet.
+          Historique natif indexé pour {{ raccourcirAdresse(adresseWallet) }}.
         </p>
       </div>
 
@@ -115,6 +150,23 @@
         class="empty-state"
       >
         Connectez d'abord un wallet.
+      </div>
+
+      <div *ngIf="transactionsLoading" class="empty-state" aria-live="polite">
+        Chargement des transactions indexées…
+      </div>
+      <div *ngIf="transactionsError" class="empty-state" role="alert">
+        Indexeur indisponible : {{ transactionsError }}
+      </div>
+      <div *ngIf="transactionsState === 'syncing'" class="empty-state" aria-live="polite">
+        Synchronisation en cours. Historique indexé jusqu’au bloc
+        {{ transactionsIndexedThrough ?? '—' }}; les résultats peuvent être incomplets.
+      </div>
+      <div
+        *ngIf="!transactionsLoading && !transactionsError && transactions.length === 0 && transactionsHistoryComplete"
+        class="empty-state"
+      >
+        Aucune transaction native trouvée jusqu’au bloc {{ transactionsIndexedThrough }}.
       </div>
 
       <div
@@ -146,15 +198,7 @@
           <span>
             {{
               raccourcirAdresse(
-                estEnvoyee(tx)
-                  ? (
-                      tx.to ??
-                      tx.toAddress
-                    )
-                  : (
-                      tx.from ??
-                      tx.fromAddress
-                    )
+                estEnvoyee(tx) ? tx.to : tx.from
               )
             }}
           </span>
@@ -164,21 +208,28 @@
         <div>
           {{
             obtenirMontant(tx)
-              | number:'1.2-6'
           }}
           DGV
         </div>
 
-        <button
-          class="hash-button"
-          (click)="ouvrirTransaction(
-            obtenirHash(tx)
-          )"
-        >
-          Voir transaction
-        </button>
+        <div class="activity-meta">
+          <span>Bloc {{ obtenirBloc(tx) }} · {{ obtenirDate(tx) | date:'medium' }}</span>
+          <span>Frais : {{ tx.feeDgv }} DGV</span>
+          <span [class.tx-failed]="tx.status !== 1">{{ tx.status === 1 ? 'Confirmée' : 'Échouée' }}</span>
+          <button class="hash-button" (click)="ouvrirTransaction(obtenirHash(tx))">Voir transaction</button>
+        </div>
 
       </div>
+
+      <nav
+        *ngIf="transactionsTotal > transactionsPageSize"
+        class="history-pagination"
+        aria-label="Pagination de l’historique"
+      >
+        <button type="button" [disabled]="transactionsPage === 0 || transactionsLoading" (click)="pageHistorique(-1)">Précédent</button>
+        <span>Page {{ transactionsPage + 1 }} · {{ transactionsTotal }} transactions indexées</span>
+        <button type="button" [disabled]="(transactionsPage + 1) * transactionsPageSize >= transactionsTotal || transactionsLoading" (click)="pageHistorique(1)">Suivant</button>
+      </nav>
 
     </section>
 
@@ -266,6 +317,7 @@
         id="dapp-recipient"
         type="text"
         [(ngModel)]="adresseDestinataire"
+        (ngModelChange)="invaliderPreparationTransfert()"
         placeholder="0x..."
         autocomplete="off"
         [disabled]="transactionEnCours"
@@ -277,6 +329,7 @@
           id="dapp-amount"
           type="number"
           [(ngModel)]="montantEnvoi"
+          (ngModelChange)="invaliderPreparationTransfert()"
           min="0"
           step="0.000001"
           [disabled]="transactionEnCours"
@@ -285,20 +338,11 @@
       </div>
 
       <p class="available-balance">
-        Solde du Wallet connecté : {{ soldeDgv | number:'1.2-6' }} DGV
+        Solde du Wallet connecté : {{ soldeDgvDisplay }} {{ soldeDgvSymbol }}
       </p>
       <p class="available-balance">
-        L’envoi utilise le Smart Wallet. Le compte de session doit aussi
-        avoir du DGV pour payer le gas.
+        DGV est envoyé comme monnaie native. La signature est effectuée par le portefeuille local déverrouillé qui détient les fonds; la session DApp ne signe pas à sa place.
       </p>
-      <button
-        *ngIf="sessionWallet && !sessionAutorisee && !demandeAutorisationSessionId"
-        type="button"
-        class="receive-button"
-        (click)="demanderAutorisationSession()"
-      >
-        Réessayer l’autorisation de session
-      </button>
 
       <p
         *ngIf="messageTransaction"
@@ -311,11 +355,33 @@
       <button
         type="button"
         class="confirm-transfer"
-        [disabled]="transactionEnCours"
+        [disabled]="transactionEnCours || !rpcConnected"
         (click)="preparerEnvoi()"
       >
-        {{ transactionEnCours ? 'Envoi en cours...' : 'Envoyer directement' }}
+        {{ transactionEnCours ? 'Vérification en cours...' : 'Vérifier le transfert' }}
       </button>
+
+      <section
+        *ngIf="preparedTransfer as transfer"
+        class="transfer-summary"
+        aria-label="Récapitulatif du transfert"
+      >
+        <h3>Récapitulatif vérifié</h3>
+        <p><span>De (EOA)</span><code>{{ transfer.sender }}</code></p>
+        <p><span>Vers</span><code>{{ transfer.recipient }}</code></p>
+        <p><span>Montant</span><strong>{{ transfer.amountDgv }} DGV</strong></p>
+        <p><span>Frais estimés</span><strong>{{ transfer.estimatedFeeDgv }} DGV</strong></p>
+        <p><span>Solde après transfert estimé</span><strong>{{ formatDgvWei(transfer.senderBalance - transfer.amount - transfer.estimatedFee) }} DGV</strong></p>
+        <p><span>Réseau vérifié</span><strong>DIGEVRA Local · Chain ID {{ transfer.chainId }}</strong></p>
+        <button
+          type="button"
+          class="confirm-transfer"
+          [disabled]="transactionEnCours"
+          (click)="confirmerEtEnvoyer()"
+        >
+          {{ transactionEnCours ? 'Confirmation en cours...' : 'Confirmer et envoyer' }}
+        </button>
+      </section>
 
       <button
         *ngIf="dernierHashTransaction"
@@ -375,9 +441,12 @@
         </div>
 
         <div class="settings-row">
-          <span>Backend</span>
-          <code>{{ backendUrl }}</code>
+          <span>RPC</span>
+          <code>{{ rpcEndpointDisplay }}</code>
         </div>
+        <p class="v3-network-warning">
+          Le proxy /besu-rpc est réservé à ng serve. En production, l’URL RPC configurée est utilisée directement et doit être accessible par le navigateur (CORS/TLS selon l’hébergement).
+        </p>
 
         <div class="settings-row">
           <span>Explorer</span>
@@ -432,7 +501,7 @@
   <nav class="v3-mobile-nav" aria-label="Navigation mobile">
     <button [class.active]="vueActive === 'wallet'" (click)="ouvrirWalletView()"><span>⌂</span>Accueil</button>
     <button [class.active]="vueActive === 'activite'" (click)="ouvrirActivite()"><span>◷</span>Historique</button>
-    <button (click)="ouvrirEnvoi()"><span>↑</span>Envoyer</button>
+    <button [disabled]="modeDemonstration || !rpcConnected" (click)="ouvrirEnvoi()"><span>↑</span>Envoyer</button>
     <button [class.active]="vueActive === 'parametres'" (click)="ouvrirParametres()"><span>⚙</span>Paramètres</button>
     <button (click)="ouvrirExplorer()"><span>↗</span>Explorer</button>
   </nav>

@@ -1,4 +1,44 @@
+import type { ExplorerRouteMode } from '../../explorer/routes.js';
+import { isDevMode } from '@angular/core';
+
+export interface DigevraRuntimeConfig {
+  deploymentMode: 'demo' | 'live';
+  chainId: number;
+  rpcUrl: string;
+  indexerApiUrl: string;
+  walletUrl: string | null;
+  explorerUrl: string | null;
+}
+
+declare global {
+  var DIGEVRA_CONFIG: DigevraRuntimeConfig | undefined;
+}
+
 export type NetworkKey = 'digevra-local' | 'ethereum-sepolia';
+
+const runtimeConfig = globalThis.DIGEVRA_CONFIG;
+const developmentMode = isDevMode();
+
+function developmentServiceUrl(port: number): string | null {
+  if (!developmentMode || typeof window === 'undefined') return null;
+  const url = new URL(window.location.origin);
+  url.port = String(port);
+  url.pathname = '/';
+  return url.toString();
+}
+
+export function isDemoDeployment(
+  config: DigevraRuntimeConfig | undefined,
+  isDevelopment: boolean
+): boolean {
+  return !isDevelopment && (
+    config?.deploymentMode !== 'live' ||
+    !config?.rpcUrl?.trim() ||
+    !config?.indexerApiUrl?.trim()
+  );
+}
+
+export const DIGEVRA_DEV_RPC_PROXY_PATH = '/besu-rpc';
 
 export interface NetworkConfig {
   key: NetworkKey;
@@ -13,7 +53,7 @@ export interface NetworkConfig {
     verified: boolean;
   };
   explorerUrl: string | null;
-  backendUrl: string | null;
+  explorerRouteMode: ExplorerRouteMode;
   walletUrl: string | null;
   consensus: string;
   dgvTokenAddress: string | null;
@@ -25,17 +65,23 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
     key: 'digevra-local',
     name: 'DIGEVRA Local',
     chainId: 20261019,
-    rpcUrl: 'http://127.0.0.1:9545',
-    rpcRequiresConfiguration: false,
+    rpcUrl: developmentMode
+      ? ''
+      : runtimeConfig?.rpcUrl?.trim() ?? '',
+    rpcRequiresConfiguration: !developmentMode && !runtimeConfig?.rpcUrl?.trim(),
     nativeCurrency: {
       name: 'DGV',
       symbol: 'DGV',
       decimals: 18,
       verified: false
     },
-    explorerUrl: 'http://localhost:4201',
-    backendUrl: 'http://localhost:3000',
-    walletUrl: 'http://localhost:4200',
+    explorerUrl: developmentMode
+      ? developmentServiceUrl(4201)
+      : runtimeConfig?.explorerUrl ?? null,
+    explorerRouteMode: 'hash',
+    walletUrl: developmentMode
+      ? developmentServiceUrl(4200)
+      : runtimeConfig?.walletUrl ?? null,
     consensus: 'QBFT déclaré (non vérifié)',
     dgvTokenAddress: null,
     smartWalletAddress: '0xf0571df1FB4a56b83aD3962D4167C2cAE32F25d1'
@@ -54,13 +100,14 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
       verified: true
     },
     explorerUrl: 'https://sepolia.etherscan.io',
-    backendUrl: null,
+    explorerRouteMode: 'path',
     walletUrl: null,
     consensus: 'Proof of Stake',
     dgvTokenAddress: null,
     smartWalletAddress: null
   }
 };
+
 
 export function setRpcUrl(
   key: NetworkKey,

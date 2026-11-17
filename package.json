@@ -3,10 +3,14 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "start": "ng serve",
+    "start": "ng serve --configuration development",
+    "start:explorer": "node explorer/server.mjs",
     "build": "ng build",
+    "build:pages": "ng build --configuration production --base-href /Digevra-Dapp/ && node scripts/prepare-pages.mjs",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "test:explorer": "node --test explorer/*.test.mjs",
+    "test:indexer": "node --test indexer/*.test.mjs"
   },
   "private": true,
   "packageManager": "npm@11.19.1",
