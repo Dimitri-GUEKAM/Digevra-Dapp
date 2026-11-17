@@ -86,7 +86,7 @@ test('renders block details with a working transactions link', async () => {
     await import('./explorer.js?block-route-regression');
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    assert.match(document.querySelector('#content').textContent, /Bloc 27\s*640/);
+    assert.match(document.querySelector('#content').textContent, /Bloc 27(?:,|\s)640/);
     assert.equal(document.querySelector('#global-message').hidden, true);
     assert.equal(
       document.querySelector('#content a[href="#/transactions"]').textContent,
