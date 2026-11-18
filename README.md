@@ -26,6 +26,8 @@ transaction broadcasts do not.
 The Pages build rejects missing, non-HTTPS, loopback, and private-network
 endpoints in live mode; demo mode must keep both backend URLs empty. Never
 publish admin RPC endpoints, keys, or credentials.
+The build fingerprints the runtime config script URL so browsers fetch changed
+public endpoints rather than reusing a stale cached demo configuration.
 
 The wallet's USD estimate reads `dgvUsdIndicativeRate` from
 `public/digevra-config.js`. It is currently configured to `0.25` (indicative

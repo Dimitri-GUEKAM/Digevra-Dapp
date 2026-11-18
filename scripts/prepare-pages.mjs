@@ -1,4 +1,5 @@
-import { access, copyFile, mkdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { access, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 
@@ -26,6 +27,22 @@ for (const file of explorerFiles) {
 const walletHtml = await readFile(resolve(output, 'index.html'), 'utf8');
 const explorerHtml = await readFile(resolve(explorerOutput, 'index.html'), 'utf8');
 const config = await readFile(resolve(output, 'digevra-config.js'), 'utf8');
+const configVersion = createHash('sha256').update(config).digest('hex').slice(0, 12);
+
+function versionConfigScript(html, source) {
+  const script = new RegExp(`<script src="${source}"></script>`, 'g');
+  if ((html.match(script) ?? []).length !== 1) {
+    throw new Error(`Expected exactly one runtime config script reference to ${source}.`);
+  }
+  return html.replace(script, `<script src="${source}?v=${configVersion}"></script>`);
+}
+
+const versionedWalletHtml = versionConfigScript(walletHtml, 'digevra-config.js');
+const versionedExplorerHtml = versionConfigScript(explorerHtml, '../digevra-config.js');
+await Promise.all([
+  writeFile(resolve(output, 'index.html'), versionedWalletHtml),
+  writeFile(resolve(explorerOutput, 'index.html'), versionedExplorerHtml)
+]);
 
 function readStringProperty(name) {
   const value = config.match(new RegExp(`\\b${name}:\\s*'([^']*)'`));
@@ -89,12 +106,16 @@ function assertPublicHttpsEndpoint(value, name) {
   }
 }
 
-if (!walletHtml.includes('<base href="/Digevra-Dapp/">')) {
+if (!versionedWalletHtml.includes('<base href="/Digevra-Dapp/">')) {
   throw new Error('Wallet build has an unexpected GitHub Pages base href.');
 }
-if (!explorerHtml.includes('href="./styles.css"') ||
-    !explorerHtml.includes('src="./explorer.js"')) {
+if (!versionedExplorerHtml.includes('href="./styles.css"') ||
+    !versionedExplorerHtml.includes('src="./explorer.js"')) {
   throw new Error('Explorer assets must use relative paths for GitHub Pages.');
+}
+if (!versionedWalletHtml.includes(`digevra-config.js?v=${configVersion}`) ||
+    !versionedExplorerHtml.includes(`../digevra-config.js?v=${configVersion}`)) {
+  throw new Error('Runtime configuration references must be cache-busted by content hash.');
 }
 if (!/\bchainId:\s*20261019\b/.test(config)) {
   throw new Error('Pages runtime configuration must use Chain ID 20261019.');
