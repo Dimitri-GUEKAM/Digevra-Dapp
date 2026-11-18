@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "chainId": 20261019,
+  "genesisHash": "0xb6448c0fac400f410a13813a9757faec163bb41d9a75e454466ba2c3116ed04e",
+  "lastBlockNumber": 32615,
+  "lastBlockHash": "0x3e3dce0ce2c85f91d2a83480c65e38e588dd1965984ba26fedebed135130a030",
+  "syncedAt": "2026-11-18T20:40:30.230Z",
+  "address": "0x35b4336eF00eD099e030D29f925f2C69FD86b912",
+  "balanceWei": "5000000000000000000000",
+  "balanceDgv": "5000.0",
+  "historyComplete": true,
+  "transactions": [
+    {
+      "hash": "0x954847f6c00699f1c5231c29d3027f1583e4c97da01917591681b435b316bde3",
+      "from": "0xEe0a8b0441A0559760eC384313fcAf8cC582Bb75",
+      "to": "0x35b4336eF00eD099e030D29f925f2C69FD86b912",
+      "chainId": 20261019,
+      "blockNumber": 30698,
+      "transactionIndex": 0,
+      "direction": "incoming",
+      "valueWei": "5000000000000000000000",
+      "valueDgv": "5000.0",
+      "gasUsed": "21000",
+      "effectiveGasPriceWei": "1000",
+      "feeWei": "21000000",
+      "feeDgv": "0.000000000021",
+      "status": 1,
+      "timestamp": 1795011072
+    }
+  ]
+}

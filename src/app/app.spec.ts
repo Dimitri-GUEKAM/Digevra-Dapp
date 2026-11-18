@@ -1,14 +1,28 @@
 import { TestBed } from '@angular/core/testing';
-import { Wallet } from 'ethers';
-import { App } from './app';
+import { HDNodeWallet, Wallet } from 'ethers';
+import {
+  App,
+  formatDgvBalanceDisplay,
+  formatIndicativeDgvUsd
+} from './app';
 import { NetworkService } from './network.service';
 import { NETWORKS } from './network-config';
 import { IndexerService } from './indexer.service';
 import type { IndexedTransaction } from './indexer.service';
-import { vi } from 'vitest';
+import { SnapshotService } from './snapshot.service';
+import { afterEach, vi } from 'vitest';
+import {
+  PRIMARY_WALLET_ID,
+  readStoredWalletAccounts,
+  SELECTED_WALLET_STORAGE_KEY,
+  WALLET_ACCOUNTS_STORAGE_KEY
+} from './wallet-store';
 
 describe('App', () => {
+  let runtimeConfigBeforeTest = globalThis.DIGEVRA_CONFIG;
+
   beforeEach(async () => {
+    runtimeConfigBeforeTest = globalThis.DIGEVRA_CONFIG;
     await TestBed.configureTestingModule({
       imports: [App],
       providers: [{
@@ -22,6 +36,14 @@ describe('App', () => {
       }, {
         provide: IndexerService,
         useValue: {
+          getStats: vi.fn().mockResolvedValue({
+            state: 'ready',
+            chainId: 20261019,
+            rpcConnected: true,
+            lastIndexedBlock: 100,
+            chainHead: 100,
+            historyComplete: true
+          }),
           getAddressTransactions: vi.fn().mockResolvedValue({
             items: [],
             pagination: { limit: 10, offset: 0, total: 0, hasMore: false },
@@ -34,9 +56,93 @@ describe('App', () => {
             }
           })
         }
+      }, {
+        provide: SnapshotService,
+        useValue: {
+          load: vi.fn().mockResolvedValue({ snapshot: null, warning: '' }),
+          saveLocal: vi.fn(),
+          readLocal: vi.fn().mockReturnValue(null)
+        }
       }]
     })
       .compileComponents();
+  });
+
+  afterEach(() => {
+    globalThis.DIGEVRA_CONFIG = runtimeConfigBeforeTest;
+  });
+
+  it('formats an indicative DGV conversion with dollars and grouped cents', () => {
+    expect(formatIndicativeDgvUsd('5000', 0.25)).toBe('≈ $1,250.00');
+    expect(formatIndicativeDgvUsd('1000', 0.25)).toBe('≈ $250.00');
+    expect(formatIndicativeDgvUsd('0', 0.25)).toBe('≈ $0.00');
+    expect(formatIndicativeDgvUsd('5000', 0.25015)).toBe('≈ $1,250.75');
+    expect(formatIndicativeDgvUsd('5000', null)).toBeNull();
+    expect(formatIndicativeDgvUsd('5000', 0)).toBeNull();
+    expect(formatIndicativeDgvUsd('not-a-balance', 0.25)).toBeNull();
+    expect(formatIndicativeDgvUsd('9007199254740993', 0.25))
+      .toBe('≈ $2,251,799,813,685,248.25');
+    expect(formatDgvBalanceDisplay('5000.0')).toBe('5 000');
+    expect(formatDgvBalanceDisplay('1000000.250000')).toBe('1 000 000,25');
+  });
+
+  it('updates the indicative display with the live or matching snapshot balance only', () => {
+    const config = globalThis.DIGEVRA_CONFIG;
+    try {
+      globalThis.DIGEVRA_CONFIG = {
+        deploymentMode: 'demo',
+        chainId: 20261019,
+        rpcUrl: '',
+        indexerApiUrl: '',
+        walletUrl: null,
+        explorerUrl: null,
+        dgvUsdIndicativeRate: 0.25
+      };
+      const fixture = TestBed.createComponent(App);
+      const app = fixture.componentInstance;
+      app.rpcConnected = true;
+      app.soldeEth = '5000';
+      expect(app.dgvUsdEstimatedValue).toBe('≈ $1,250.00');
+
+      app.soldeEth = '6000';
+      expect(app.dgvUsdEstimatedValue).toBe('≈ $1,500.00');
+      globalThis.DIGEVRA_CONFIG = {
+        ...globalThis.DIGEVRA_CONFIG!,
+        dgvUsdIndicativeRate: 0.5
+      };
+      expect(app.dgvUsdEstimatedValue).toBe('≈ $3,000.00');
+      app.soldeEth = '0';
+      expect(app.dgvUsdEstimatedValue).toBe('≈ $0.00');
+      globalThis.DIGEVRA_CONFIG = {
+        ...globalThis.DIGEVRA_CONFIG!,
+        dgvUsdIndicativeRate: 0.25
+      };
+
+      app.rpcConnected = false;
+      app.adresseWallet = '0x35b4336eF00eD099e030D29f925f2C69FD86b912';
+      app.snapshot = {
+        schemaVersion: 1,
+        chainId: 20261019,
+        genesisHash: '0xb6448c0fac400f410a13813a9757faec163bb41d9a75e454466ba2c3116ed04e',
+        lastBlockNumber: 30698,
+        lastBlockHash: `0x${'a'.repeat(64)}`,
+        syncedAt: '2026-01-01T00:00:00.000Z',
+        address: app.adresseWallet,
+        balanceWei: '5000000000000000000000',
+        balanceDgv: '5000.0',
+        historyComplete: true,
+        transactions: []
+      };
+      expect(app.dgvUsdEstimatedValue).toBe('≈ $1,250.00');
+
+      app.adresseWallet = '0xEe0a8b0441A0559760eC384313fcAf8cC582Bb75';
+      expect(app.dgvUsdEstimatedValue).toBeNull();
+      app.activeNetworkKey = 'ethereum-sepolia';
+      expect(app.dgvUsdEstimatedValue).toBeNull();
+      fixture.destroy();
+    } finally {
+      globalThis.DIGEVRA_CONFIG = config;
+    }
   });
 
   it('should create the app', () => {
@@ -45,16 +151,133 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
+  it('displays a matching stale snapshot and keeps network actions disabled', async () => {
+    const config = globalThis.DIGEVRA_CONFIG;
+    globalThis.DIGEVRA_CONFIG = {
+      deploymentMode: 'demo',
+      chainId: 20261019,
+      rpcUrl: '',
+      indexerApiUrl: '',
+      walletUrl: null,
+      explorerUrl: null,
+      dgvUsdIndicativeRate: 0.25
+    };
+    localStorage.removeItem('digevra_connected_address');
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    vi.spyOn(app, 'changerReseau').mockResolvedValue(undefined);
+    app.walletConnecte = true;
+    app.vueActive = 'wallet';
+    app.adresseWallet = '0x35b4336eF00eD099e030D29f925f2C69FD86b912';
+    app.snapshot = {
+      schemaVersion: 1,
+      chainId: 20261019,
+      genesisHash: '0xb6448c0fac400f410a13813a9757faec163bb41d9a75e454466ba2c3116ed04e',
+      lastBlockNumber: 30698,
+      lastBlockHash: `0x${'a'.repeat(64)}`,
+      syncedAt: '2026-01-01T00:00:00.000Z',
+      address: app.adresseWallet,
+      balanceWei: '5000000000000000000000',
+      balanceDgv: '5000.0',
+      historyComplete: true,
+      transactions: []
+    };
+    fixture.detectChanges();
+    await fixture.whenStable();
+    app.soldeDgvDisplay = '5000.0';
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(app.snapshotVisible).toBe(true);
+    expect(app.walletConnecte).toBe(true);
+    expect(compiled.querySelector('.v3-balance-number')?.textContent)
+      .toContain('5 000');
+    expect(compiled.querySelector('.v3-snapshot-stale')?.textContent)
+      .toContain('Données non actualisées');
+    expect(compiled.querySelector('.v3-balance-fiat')?.textContent)
+      .toContain('≈ $1,250.00');
+    expect(compiled.querySelector('.v3-balance-fiat small')?.textContent)
+      .toContain('Valeur indicative');
+    expect(compiled.querySelector('.v3-action:not(.v3-coming-soon)')?.hasAttribute('disabled'))
+      .toBe(true);
+    expect(app.rpcConnected).toBe(false);
+    fixture.destroy();
+    globalThis.DIGEVRA_CONFIG = config;
+  });
+
+  it('does not expose a snapshot for a different selected address or network', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.adresseWallet = '0x35b4336eF00eD099e030D29f925f2C69FD86b912';
+    app.snapshot = {
+      schemaVersion: 1,
+      chainId: 20261019,
+      genesisHash: '0xb6448c0fac400f410a13813a9757faec163bb41d9a75e454466ba2c3116ed04e',
+      lastBlockNumber: 30698,
+      lastBlockHash: `0x${'a'.repeat(64)}`,
+      syncedAt: '2026-01-01T00:00:00.000Z',
+      address: '0xEe0a8b0441A0559760eC384313fcAf8cC582Bb75',
+      balanceWei: '5000000000000000000000',
+      balanceDgv: '5000.0',
+      historyComplete: true,
+      transactions: []
+    };
+    expect(app.snapshotVisible).toBe(false);
+    app.snapshot.address = app.adresseWallet;
+    app.activeNetworkKey = 'ethereum-sepolia';
+    expect(app.snapshotVisible).toBe(false);
+    fixture.destroy();
+  });
+
   it('renders the DIGEVRA auth screen with all welcome options', async () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('.auth-card h1')?.textContent)
-      .toContain('DIGEVRA Wallet');
+      .toContain('WELCOME TO DIGEVRA');
+    expect(compiled.querySelector('.auth-logo')?.getAttribute('src'))
+      .toBe('digevra-logo.png');
+    expect(compiled.querySelector('.auth-illustration')).toBeNull();
+    expect(compiled.querySelector('.auth-card .auth-intro')?.textContent)
+      .toContain('Votre passerelle vers un nouvel écosystème financier décentralisé.');
     expect(compiled.querySelector('.welcome-screen')).toBeNull();
-    expect(compiled.querySelectorAll('.auth-options button')).toHaveLength(3);
+    expect(compiled.querySelectorAll('.auth-options > .auth-primary, .auth-options > .auth-secondary'))
+      .toHaveLength(2);
+    expect(compiled.querySelector('.auth-login-prompt')?.textContent)
+      .toContain('Déjà un compte ?');
+    expect(compiled.querySelector('.auth-login-link')?.textContent)
+      .toContain('Se connecter');
     expect(compiled.querySelector('.auth-back')).toBeNull();
+    const settingsButton = compiled.querySelector(
+      '.auth-settings-button'
+    ) as HTMLButtonElement | null;
+    expect(settingsButton?.textContent).toContain('Paramètres');
+    settingsButton?.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(compiled.querySelector('#auth-settings-panel')?.hasAttribute('hidden'))
+      .toBe(false);
+    expect(compiled.querySelector('.auth-settings-rpc-status')?.textContent)
+      .toContain('Indisponible');
+    expect(compiled.querySelector('.auth-settings-indexer-status')?.textContent)
+      .toContain('Connecté');
+    expect(compiled.querySelectorAll(
+      '#auth-settings-panel input, #auth-settings-panel textarea'
+    )).toHaveLength(0);
+    fixture.destroy();
+  });
+
+  it('uses the DIGEVRA mark in the wallet header and balance card', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.componentInstance.walletConnecte = true;
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.querySelector('.v3-brand-logo')?.getAttribute('src'))
+      .toBe('digevra-mark.png');
+    expect(compiled.querySelector('.v3-balance-art')?.getAttribute('src'))
+      .toBe('digevra-mark.png');
     fixture.destroy();
   });
 
@@ -62,8 +285,14 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    app.walletConnecte = true;
+    fixture.detectChanges();
 
-    app.ouvrirExplorer();
+    const explorerButton = fixture.nativeElement.querySelector(
+      '.v3-explorer-banner button'
+    ) as HTMLButtonElement | null;
+    expect(explorerButton?.textContent).toContain('Explorer maintenant');
+    explorerButton?.click();
 
     expect(open).toHaveBeenCalledWith(
       'http://localhost:4201/#/',
@@ -100,6 +329,232 @@ describe('App', () => {
       '_blank',
       'noopener,noreferrer'
     );
+    fixture.destroy();
+  });
+
+  it('preserves the legacy vault while adding watch, private-key, and selected mnemonic accounts', async () => {
+    const storageKeys = [
+      'digevra_vault_v1',
+      WALLET_ACCOUNTS_STORAGE_KEY,
+      SELECTED_WALLET_STORAGE_KEY
+    ];
+    const previousStorage = new Map(
+      storageKeys.map((key) => [key, localStorage.getItem(key)])
+    );
+    const password = 'multi-wallet test password only';
+    const primary = new Wallet(`0x${'2'.repeat(64)}`);
+    const encryptedPrimary = await primary.encrypt(password);
+    const privateKey = `0x${'1'.repeat(64)}`;
+    const importedPrivateWallet = new Wallet(privateKey);
+    const testPhrase = 'test test test test test test test test test test test junk';
+    const phraseAccount0 = new Wallet(`0x${'3'.repeat(64)}`);
+    const phraseAccount1 = new Wallet(`0x${'4'.repeat(64)}`);
+    const phraseDerivation = vi.spyOn(HDNodeWallet, 'fromPhrase')
+      .mockImplementation((_phrase, _password, path) =>
+        (path?.endsWith('/0') ? phraseAccount0 : phraseAccount1) as unknown as HDNodeWallet
+      );
+    localStorage.setItem('digevra_vault_v1', encryptedPrimary);
+    localStorage.removeItem(WALLET_ACCOUNTS_STORAGE_KEY);
+    localStorage.removeItem(SELECTED_WALLET_STORAGE_KEY);
+
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const networkService = TestBed.inject(NetworkService);
+    const indexerService = TestBed.inject(IndexerService);
+    const provider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: 20261019n }),
+      destroy: vi.fn()
+    };
+    vi.mocked(networkService.getNativeBalance).mockImplementation(
+      async (_provider, address) => address.toLowerCase() ===
+        importedPrivateWallet.address.toLowerCase()
+        ? '2.5'
+        : '1.25'
+    );
+    (app as unknown as { rpcProvider: typeof provider }).rpcProvider = provider;
+    app.rpcConnected = true;
+    try {
+      app.authPassword = password;
+      await app.deverrouiller();
+      expect(app.vaultUnlocked).toBe(true);
+      expect(app.walletAccounts).toHaveLength(1);
+      expect(app.walletAccounts[0].address).toBe(primary.address);
+      expect(app.adresseWallet).toBe(primary.address);
+
+      app.ouvrirGestionnairePortefeuilles();
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.wallet-manager-panel'))
+        .toBeTruthy();
+
+      app.ouvrirAjoutPortefeuille('watch');
+      app.walletNameInput = 'Lecture seule';
+      app.walletAddressInput = '0x0000000000000000000000000000000000000022';
+      await app.ajouterPortefeuille();
+      app.rpcConnected = true;
+      (app as unknown as { rpcProvider: typeof provider }).rpcProvider = provider;
+      await app.chargerSoldePortefeuilles();
+      const watch = app.walletAccounts.find((account) => account.kind === 'watch');
+      expect(watch).toBeTruthy();
+      expect(networkService.getNativeBalance).toHaveBeenCalled();
+      expect(watch?.balanceDgv).toBe('1.25');
+      expect(app.activeWalletReadOnly).toBe(true);
+      app.ouvrirEnvoi();
+      expect(app.panneauTransfert).toBe('aucun');
+      expect(app.messageTransaction).toContain('lecture seule');
+
+      app.ouvrirAjoutPortefeuille('private-key');
+      app.walletNameInput = 'Clé de test';
+      app.walletPrivateKeyInput = privateKey;
+      app.previsualiserClePrivee();
+      expect(app.walletPrivateKeyPreview).toBe(importedPrivateWallet.address);
+      app.walletVaultPassword = password;
+      await app.ajouterPortefeuille();
+      const privateAccount = app.walletAccounts.find(
+        (account) => account.kind === 'private-key'
+      );
+      expect(privateAccount?.address).toBe(importedPrivateWallet.address);
+      expect(privateAccount?.balanceDgv).toBe('2.5');
+      expect(app.adresseWallet).toBe(importedPrivateWallet.address);
+
+      app.ouvrirAjoutPortefeuille('mnemonic');
+      app.walletNameInput = 'Récupération de test';
+      app.walletMnemonicInput = testPhrase;
+      app.previsualiserPhrase();
+      expect(app.walletMnemonicPreviews.map((entry) => entry.address))
+        .toContain(phraseAccount0.address);
+      expect(app.walletMnemonicPreviews.map((entry) => entry.address))
+        .toContain(phraseAccount1.address);
+      app.walletMnemonicPreviews.forEach((entry) => {
+        entry.selected = entry.index < 2;
+      });
+      app.walletVaultPassword = password;
+      await app.ajouterPortefeuille();
+      const mnemonicAccounts = app.walletAccounts.filter(
+        (account) => account.kind === 'mnemonic'
+      );
+      expect(mnemonicAccounts.map((account) => account.address))
+        .toEqual([phraseAccount0.address, phraseAccount1.address]);
+      expect(app.walletAccounts).toHaveLength(5);
+      expect(app.walletAccounts.find(
+        (account) => account.id === PRIMARY_WALLET_ID
+      )?.address).toBe(primary.address);
+      expect(app.selectedWalletId).toBe(mnemonicAccounts[0].id);
+      expect(app.adresseWallet).toBe(phraseAccount0.address);
+
+      const persisted = readStoredWalletAccounts(localStorage);
+      expect(persisted).toHaveLength(5);
+      expect(persisted.find((account) => account.kind === 'watch')?.encryptedJson)
+        .toBeUndefined();
+      expect(persisted.filter(
+        (account) => account.kind === 'private-key' || account.kind === 'mnemonic'
+      ).every((account) => Boolean(account.encryptedJson))).toBe(true);
+      const persistedText = localStorage.getItem(WALLET_ACCOUNTS_STORAGE_KEY) ?? '';
+      expect(persistedText).not.toContain(privateKey);
+      expect(persistedText).not.toContain(testPhrase);
+      expect(localStorage.getItem('digevra_vault_v1')).toBe(encryptedPrimary);
+      expect(localStorage.getItem(SELECTED_WALLET_STORAGE_KEY))
+        .toBe(mnemonicAccounts[0].id);
+
+      await app.selectionnerPortefeuille(PRIMARY_WALLET_ID);
+      expect(app.adresseWallet).toBe(primary.address);
+      await app.selectionnerPortefeuille(watch!.id);
+      expect(app.activeWalletReadOnly).toBe(true);
+      await app.chargerHistorique(0);
+      expect(indexerService.getAddressTransactions)
+        .toHaveBeenLastCalledWith(watch!.address, 10, 0);
+
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.wallet-manager-trigger'))
+        .toBeTruthy();
+      expect(fixture.nativeElement.textContent).toContain('Lecture seule');
+      app.verrouiller();
+      expect(app.vaultUnlocked).toBe(false);
+      expect(app.walletAccounts).toHaveLength(0);
+      expect(app.walletPrivateKeyInput).toBe('');
+      expect(app.walletMnemonicInput).toBe('');
+      expect(localStorage.getItem('digevra_vault_v1')).toBe(encryptedPrimary);
+
+      app.authPassword = password;
+      await app.deverrouiller();
+      expect(app.vaultUnlocked).toBe(true);
+      expect(app.selectedWalletId).toBe(watch!.id);
+      await app.selectionnerPortefeuille(privateAccount!.id);
+      expect(app.adresseWallet).toBe(importedPrivateWallet.address);
+      await app.selectionnerPortefeuille(mnemonicAccounts[1].id);
+      expect(app.adresseWallet).toBe(phraseAccount1.address);
+    } finally {
+      fixture.destroy();
+      phraseDerivation.mockRestore();
+      for (const [key, value] of previousStorage) {
+        if (value === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+      }
+    }
+  }, 30000);
+
+  it('renders the wallet home sections in the requested order with four tactile actions', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.walletConnecte = true;
+    app.adresseWallet = '0x1111111111111111111111111111111111111111';
+
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    const orderedSections = [
+      compiled.querySelector('.v3-topbar'),
+      compiled.querySelector('.v3-balance'),
+      compiled.querySelector('.v3-actions'),
+      compiled.querySelector('.v3-recent'),
+      compiled.querySelector('.v3-explorer-banner'),
+      compiled.querySelector('.v3-mobile-nav')
+    ];
+    expect(orderedSections.every((section) => section !== null)).toBe(true);
+    for (let index = 0; index < orderedSections.length - 1; index += 1) {
+      expect(
+        orderedSections[index]!.compareDocumentPosition(orderedSections[index + 1]!)
+          & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    }
+    expect(compiled.querySelector('.v3-network')).toBeNull();
+    expect(compiled.querySelector('.v3-explorer-banner')).toBeTruthy();
+    expect(compiled.querySelector('.v3-greeting')?.textContent)
+      .toContain('Bienvenue sur DIGEVRA.');
+    expect(compiled.querySelector('.v3-balance-toggle')).toBeTruthy();
+    expect(compiled.querySelector('.network-pill')).toBeNull();
+    expect(compiled.querySelector('.v3-content')?.textContent)
+      .not.toContain(app.adresseWallet);
+
+    expect(compiled.querySelectorAll('.v3-actions .v3-action')).toHaveLength(4);
+    expect(compiled.querySelector('.v3-coming-soon[aria-label="Swapper, bientôt disponible"]'))
+      .toBeTruthy();
+    expect(compiled.querySelector('.v3-coming-soon[aria-label="Acheter, bientôt disponible"]'))
+      .toBeTruthy();
+    expect(Array.from(compiled.querySelectorAll('.v3-mobile-nav button'))
+      .map((button) => button.textContent?.trim()))
+      .toEqual(['⌂Accueil', '◷Portefeuille', '◇NFT', '•••Plus']);
+    fixture.destroy();
+  });
+
+  it('shows an accessible coming-soon message for the NFT navigation item', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+
+    app.afficherBientotDisponible('NFT');
+
+    expect(app.messageNavigation).toBe('NFT — bientôt disponible.');
+    fixture.destroy();
+  });
+
+  it('shows an accessible notification status from the header action', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+
+    app.afficherNotifications();
+
+    expect(app.messageNavigation).toBe('Aucune nouvelle notification.');
     fixture.destroy();
   });
 
@@ -170,7 +625,7 @@ describe('App', () => {
     const app = fixture.componentInstance;
     app.walletConnecte = true;
     app.adresseWallet = '0x1111111111111111111111111111111111111111';
-    app.transactions = [{
+    const transaction = {
       hash: `0x${'a'.repeat(64)}`,
       blockNumber: 123,
       transactionIndex: 0,
@@ -184,18 +639,89 @@ describe('App', () => {
       feeDgv: '0.000000000021',
       status: 1,
       timestamp: 1_700_000_000
-    } satisfies IndexedTransaction];
+    } satisfies IndexedTransaction;
+    const receivedTransaction = {
+      ...transaction,
+      hash: `0x${'b'.repeat(64)}`,
+      from: '0x3333333333333333333333333333333333333333',
+      to: app.adresseWallet,
+      valueDgv: '1.2'
+    } satisfies IndexedTransaction;
+    app.transactions = [transaction, receivedTransaction];
 
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
 
     const recent = fixture.nativeElement.querySelector('.v3-recent') as HTMLElement;
-    expect(recent.querySelectorAll('.v3-tx')).toHaveLength(1);
+    expect(recent.querySelectorAll('.v3-tx')).toHaveLength(2);
     expect(recent.textContent).toContain('Envoi');
     expect(recent.textContent).toContain('-0.01 DGV');
-    expect(recent.textContent).toContain('bloc 123');
+    expect(recent.textContent).toMatch(/bloc 123/i);
     expect(recent.textContent).toContain('Frais : 0.000000000021 DGV');
+    expect(recent.querySelector('.v3-tx-icon.sent')).toBeTruthy();
+    expect(recent.querySelector('.v3-tx-value.sent')).toBeTruthy();
+    expect(recent.querySelector('.v3-tx-icon.received')).toBeTruthy();
+    expect(recent.querySelector('.v3-tx-value.received')?.textContent)
+      .toContain('+1.2 DGV');
+    expect(recent.textContent).toContain('Confirmée');
+    const endpoints = recent.querySelectorAll('.v3-tx-address');
+    expect(endpoints).toHaveLength(4);
+    expect(endpoints[0].textContent).toContain('De');
+    expect(endpoints[0].textContent).toContain('0x111111');
+    expect(endpoints[1].textContent).toContain('Vers');
+    expect(endpoints[1].textContent).toContain('0x222222');
+    expect(endpoints[2].textContent).toContain('0x333333');
+    expect(endpoints[3].textContent).toContain('0x111111');
+
+    vi.mocked(TestBed.inject(IndexerService).getAddressTransactions)
+      .mockResolvedValue({
+        items: [transaction],
+        pagination: { limit: 10, offset: 0, total: 1, hasMore: false },
+        indexer: {
+          state: 'ready',
+          startBlock: 0,
+          lastIndexedBlock: 123,
+          chainHead: 123,
+          historyComplete: true
+        }
+      });
+
+    app.vueActive = 'activite';
+    await app.chargerHistorique();
+    fixture.detectChanges();
+    const historyEndpoints = fixture.nativeElement.querySelectorAll(
+      '.activity-addresses code'
+    );
+    expect(historyEndpoints).toHaveLength(2);
+    expect(historyEndpoints[0].textContent).toContain('0x111111');
+    expect(historyEndpoints[1].textContent).toContain('0x222222');
+    fixture.destroy();
+  });
+
+  it('masks the balance display without changing its source value', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.walletConnecte = true;
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const toggle = fixture.nativeElement.querySelector(
+      '.v3-balance-toggle'
+    ) as HTMLButtonElement;
+    const sourceBalance = app.soldeDgvDisplay;
+    toggle.click();
+    fixture.detectChanges();
+    expect(app.soldeMasque).toBe(true);
+    expect(toggle.getAttribute('aria-label')).toBe('Afficher le solde');
+    expect(fixture.nativeElement.querySelector('.v3-balance-number')
+      ?.textContent).toContain('••••••');
+
+    toggle.click();
+    fixture.detectChanges();
+    expect(app.soldeMasque).toBe(false);
+    expect(toggle.getAttribute('aria-label')).toBe('Masquer le solde');
+    expect(app.soldeDgvDisplay).toBe(sourceBalance);
     fixture.destroy();
   });
 
@@ -235,6 +761,8 @@ describe('App', () => {
     expect(app.authMode).toBe('import');
 
     app.choisirAuth('welcome');
+    fixture.detectChanges();
+    app.vaultExists = false;
     fixture.detectChanges();
     authButtons()[2].click();
     expect(app.authMode).toBe('import');
@@ -856,6 +1384,7 @@ describe('App', () => {
       provider: provider as never,
       chainId: config.chainId,
       blockNumber: 52,
+      genesisHash: config.genesisHash ?? null,
       smartWalletDeployed: false
     }));
 
@@ -879,6 +1408,9 @@ describe('App', () => {
     const provider = {
       getNetwork: vi.fn().mockResolvedValue({ chainId: 20261019n }),
       getBlockNumber: vi.fn().mockResolvedValue(128),
+      getBlock: vi.fn().mockResolvedValue({
+        hash: NETWORKS['digevra-local'].genesisHash
+      }),
       getCode: vi.fn().mockResolvedValue('0x'),
       destroy: vi.fn()
     };
@@ -886,6 +1418,7 @@ describe('App', () => {
       provider: provider as never,
       chainId: 20261019,
       blockNumber: 127,
+      genesisHash: NETWORKS['digevra-local'].genesisHash ?? null,
       smartWalletDeployed: false
     });
     vi.spyOn(networkService, 'getNativeBalance')

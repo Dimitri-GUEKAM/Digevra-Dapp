@@ -1,33 +1,35 @@
 <section class="auth-shell" *ngIf="!walletConnecte">
   <div class="auth-card">
-    <div class="auth-mark">DGV</div>
-    <h1>DIGEVRA Wallet</h1>
-    <p>Votre portefeuille, vos clés. Réseau de démonstration : connexion à vérifier.</p>
+    <img class="auth-logo" src="digevra-logo.png" alt="Logo DIGEVRA" width="230" height="153" />
+    <p class="auth-eyebrow">VOTRE WALLET DIGEVRA</p>
+    <h1>WELCOME TO <span>DIGEVRA</span></h1>
+    <p class="auth-intro">Votre passerelle vers un nouvel écosystème financier décentralisé.</p>
     <div *ngIf="authMode === 'welcome'" class="auth-options">
       <button
         type="button"
         class="auth-primary"
         (click)="choisirAuth('create')">
-        ✚ Créer un portefeuille
+        <span aria-hidden="true">＋</span> Créer un portefeuille
       </button>
 
       <button
         type="button"
         class="auth-secondary"
         (click)="choisirAuth('import')">
-        ↓ Importer un portefeuille
+        <span aria-hidden="true">↗</span> Importer un portefeuille
       </button>
 
-      <button
-        type="button"
-        class="auth-secondary"
+      <p class="auth-login-prompt">
+        Déjà un compte ?
+        <button
+          type="button"
+          class="auth-login-link"
         (click)="choisirAuth(vaultExists ? 'unlock' : 'import')">
-        🔑 Se connecter
-      </button>
-
-      <p class="auth-hint">
-        Vos clés restent sous votre contrôle.
+          Se connecter
+        </button>
       </p>
+
+      <p class="auth-hint">Vos clés restent sous votre contrôle. Ne partagez jamais votre phrase de récupération.</p>
     </div>
     <div *ngIf="authMode === 'create' || authMode === 'import'">
       <p *ngIf="authMode === 'import'">Saisissez votre phrase uniquement dans cette application de confiance, jamais dans un formulaire envoyé par message.</p>
@@ -51,40 +53,307 @@
     <p class="auth-error" *ngIf="authError">{{ authError }}</p>
     <button class="auth-back" *ngIf="authMode !== 'welcome' && !recoveryPhrase" (click)="choisirAuth('welcome')">← Retour</button>
   </div>
+  <button
+    type="button"
+    class="auth-settings-button"
+    aria-controls="auth-settings-panel"
+    [attr.aria-expanded]="authSettingsOpen"
+    (click)="basculerParametresAuth()">
+    <span aria-hidden="true">⚙</span>
+    <span>Paramètres</span>
+  </button>
+  <section
+    id="auth-settings-panel"
+    class="auth-settings-panel"
+    role="region"
+    aria-label="Paramètres DIGEVRA"
+    [hidden]="!authSettingsOpen"
+    (keydown.escape)="fermerParametresAuth()">
+    <header class="auth-settings-header">
+      <div>
+        <h2>Paramètres</h2>
+        <p>État des services — consultation seule</p>
+      </div>
+      <button
+        type="button"
+        class="auth-settings-close"
+        aria-label="Fermer les paramètres"
+        (click)="fermerParametresAuth()">×</button>
+    </header>
+    <dl class="auth-settings-list">
+      <div>
+        <dt>Réseau prévu</dt>
+        <dd>{{ activeNetwork.name }} · Chain ID {{ activeNetwork.chainId }} · {{ activeNetwork.nativeCurrency.symbol }}</dd>
+      </div>
+      <div>
+        <dt>RPC Besu</dt>
+        <dd class="auth-settings-rpc-status">
+          {{ authSettingsRpcStatusLabel }}
+          <small>{{ rpcEndpointDisplay }}</small>
+          <small *ngIf="authSettingsRpcChainId !== null">
+            Chain ID observé {{ authSettingsRpcChainId }} · bloc {{ authSettingsRpcBlock }}
+          </small>
+          <small class="auth-settings-error" *ngIf="authSettingsRpcError">{{ authSettingsRpcError }}</small>
+        </dd>
+      </div>
+      <div>
+        <dt>Indexeur</dt>
+        <dd class="auth-settings-indexer-status">
+          {{ authSettingsIndexerStatusLabel }}
+          <small>{{ indexerEndpointDisplay }}</small>
+          <small *ngIf="authSettingsIndexerStats as stats">
+            {{ stats.state }} · bloc indexé {{ stats.lastIndexedBlock ?? '—' }} / tête {{ stats.chainHead ?? '—' }}
+            <span *ngIf="stats.historyComplete"> · historique complet</span>
+          </small>
+          <small class="auth-settings-error" *ngIf="authSettingsIndexerError">{{ authSettingsIndexerError }}</small>
+        </dd>
+      </div>
+      <div>
+        <dt>DIGEVRA Explorer</dt>
+        <dd><code>{{ explorerUrl || 'Non configuré' }}</code></dd>
+      </div>
+    </dl>
+    <button
+      type="button"
+      class="auth-settings-refresh"
+      [disabled]="authSettingsRefreshing"
+      (click)="actualiserParametresAuth()">
+      {{ authSettingsRefreshing ? 'Vérification…' : 'Actualiser les états' }}
+    </button>
+  </section>
 </section>
 
 <div *ngIf="walletConnecte">
 <div class="app">
 
-  <button class="auth-lock" (click)="verrouiller()" *ngIf="vaultExists" aria-label="Verrouiller le portefeuille">🔒 Verrouiller</button>
-  <!-- HEADER DIGEVRA V3 -->
+  <!-- Header DIGEVRA -->
   <header class="topbar v3-topbar">
-    <div class="brand"><div class="logo">D</div><div><div class="brand-title">DIGEVRA <span>Wallet</span></div><div class="brand-subtitle">Portefeuille numérique · EVM</div></div></div>
-    <nav class="nav-tabs" aria-label="Navigation principale">
-      <button [class.active]="vueActive === 'wallet'" (click)="ouvrirWalletView()">⌂ Accueil</button>
-      <button [class.active]="vueActive === 'activite'" (click)="ouvrirActivite()">◷ Historique</button>
-      <button [class.active]="vueActive === 'parametres'" (click)="ouvrirParametres()">⚙ Paramètres</button>
+    <div class="brand">
+      <img class="logo v3-brand-logo" src="digevra-mark.png" alt="" width="46" height="46" />
+      <div>
+        <div class="brand-title">DIGEVRA</div>
+        <div class="brand-subtitle">Wallet</div>
+      </div>
+    </div>
+    <button
+      *ngIf="vaultUnlocked"
+      type="button"
+      class="wallet-manager-trigger"
+      aria-label="Mes portefeuilles"
+      (click)="ouvrirGestionnairePortefeuilles()">
+      <span aria-hidden="true">▤</span>
+      <span><small>MES PORTEFEUILLES</small><strong>{{ selectedWallet?.name || 'Portefeuille' }}</strong></span>
+    </button>
+    <nav class="v3-desktop-nav" aria-label="Navigation principale">
+      <button type="button" [class.active]="vueActive === 'wallet'" [attr.aria-current]="vueActive === 'wallet' ? 'page' : null" (click)="ouvrirWalletView()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1V10Z"/></svg><span>Accueil</span></button>
+      <button type="button" [class.active]="vueActive === 'activite'" [attr.aria-current]="vueActive === 'activite' ? 'page' : null" (click)="ouvrirActivite()"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="M7 5V3m10 2V3M3 10h18m-13 4h3m-3 3h7"/></svg><span>Portefeuille</span></button>
+      <button type="button" (click)="afficherBientotDisponible('NFT')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 10-9 10L3 12 12 2Z"/><circle cx="12" cy="12" r="2"/></svg><span>NFT</span></button>
+      <button type="button" [class.active]="vueActive === 'parametres'" [attr.aria-current]="vueActive === 'parametres' ? 'page' : null" (click)="ouvrirParametres()"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>Plus</span></button>
     </nav>
     <div class="v3-header-actions">
-      <div class="network-pill" role="status"><span class="status-dot" [class.offline]="!reseauEnLigne"></span><div><strong>{{ nomReseau }}</strong><small>{{ reseauEnLigne ? 'RPC connecté' : 'RPC déconnecté' }} · Chain ID {{ actualChainId ?? '—' }}</small></div></div>
-      <button type="button" class="v3-icon-button" (click)="ouvrirParametres()" aria-label="Paramètres">⚙</button>
+      <button type="button" class="v3-icon-button v3-notification-button" (click)="afficherNotifications()" aria-label="Notifications"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12h4"/></svg></button>
+      <button type="button" class="v3-icon-button v3-profile-button" (click)="ouvrirParametres()" aria-label="Profil et paramètres"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button>
+      <button type="button" class="v3-icon-button v3-lock-button" (click)="verrouiller()" *ngIf="vaultExists" aria-label="Verrouiller le portefeuille"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/></svg></button>
     </div>
   </header>
 
+  <button
+    *ngIf="walletManagerOpen"
+    type="button"
+    class="wallet-manager-backdrop"
+    aria-label="Fermer Mes portefeuilles"
+    (click)="fermerGestionnairePortefeuilles()"></button>
+  <aside
+    *ngIf="walletManagerOpen && vaultUnlocked"
+    class="wallet-manager-panel"
+    aria-label="Mes portefeuilles">
+    <header class="wallet-manager-header">
+      <div>
+        <p>GESTION SÉCURISÉE</p>
+        <h2>Mes portefeuilles</h2>
+      </div>
+      <button type="button" class="wallet-manager-close" aria-label="Fermer" (click)="fermerGestionnairePortefeuilles()">×</button>
+    </header>
+
+    <p class="wallet-manager-error" role="alert" *ngIf="walletManagerError">{{ walletManagerError }}</p>
+    <p class="wallet-manager-message" role="status" *ngIf="walletManagerMessage">{{ walletManagerMessage }}</p>
+
+    <div class="wallet-manager-list" aria-label="Portefeuilles enregistrés">
+      <article
+        *ngFor="let account of walletAccounts"
+        class="wallet-manager-account"
+        [class.selected]="account.id === selectedWalletId">
+        <button
+          type="button"
+          class="wallet-manager-select"
+          [attr.aria-current]="account.id === selectedWalletId ? 'true' : null"
+          (click)="selectionnerPortefeuille(account.id)">
+          <span class="wallet-manager-indicator" aria-hidden="true">{{ account.id === selectedWalletId ? '✓' : '' }}</span>
+          <span class="wallet-manager-details">
+            <strong>{{ account.name }}</strong>
+            <small>{{ account.address }}</small>
+            <small class="wallet-manager-balance">
+              {{ account.balanceLoading ? 'Solde en cours…' : account.balanceDgv !== null ? account.balanceDgv + ' DGV' : 'Solde indisponible' }}
+            </small>
+            <small class="wallet-manager-kind" *ngIf="account.kind === 'watch'">Lecture seule</small>
+            <small class="wallet-manager-kind" *ngIf="account.id === primaryWalletId">Portefeuille principal</small>
+          </span>
+        </button>
+        <div class="wallet-manager-account-actions">
+          <button type="button" (click)="copierAdressePortefeuille(account)">Copier l’adresse</button>
+          <button
+            type="button"
+            *ngIf="editingWalletId !== account.id"
+            (click)="commencerRenommagePortefeuille(account)">Renommer</button>
+        </div>
+        <form
+          *ngIf="editingWalletId === account.id"
+          class="wallet-manager-rename"
+          (ngSubmit)="enregistrerNomPortefeuille()">
+          <input
+            name="editingWalletName"
+            [(ngModel)]="editingWalletName"
+            maxlength="64"
+            aria-label="Nom du portefeuille" />
+          <button type="submit">Enregistrer</button>
+          <button type="button" (click)="annulerRenommagePortefeuille()">Annuler</button>
+        </form>
+      </article>
+    </div>
+
+    <button type="button" class="wallet-manager-add" (click)="walletAddOpen = !walletAddOpen; walletAddType = null; walletManagerError = ''">
+      {{ walletAddOpen ? 'Fermer l’ajout' : 'Ajouter un portefeuille' }}
+    </button>
+    <div *ngIf="walletAddOpen" class="wallet-add-panel">
+      <p class="wallet-add-heading">Choisir une méthode d’ajout</p>
+      <div class="wallet-add-options">
+        <button type="button" [class.active]="walletAddType === 'watch'" (click)="ouvrirAjoutPortefeuille('watch')">Adresse publique</button>
+        <button type="button" [class.active]="walletAddType === 'private-key'" (click)="ouvrirAjoutPortefeuille('private-key')">Clé privée</button>
+        <button type="button" [class.active]="walletAddType === 'mnemonic'" (click)="ouvrirAjoutPortefeuille('mnemonic')">Phrase de récupération</button>
+      </div>
+
+      <form *ngIf="walletAddType === 'watch'" (ngSubmit)="ajouterPortefeuille()">
+        <label for="watch-wallet-name">Nom du portefeuille</label>
+        <input id="watch-wallet-name" name="watchName" [(ngModel)]="walletNameInput" maxlength="64" required />
+        <label for="watch-wallet-address">Adresse publique</label>
+        <input id="watch-wallet-address" name="watchAddress" [(ngModel)]="walletAddressInput" placeholder="0x…" autocomplete="off" spellcheck="false" required />
+        <p class="wallet-add-note">Lecture seule · aucune clé privée n’est demandée ni nécessaire. Les transferts sont désactivés pour ce compte.</p>
+        <button class="wallet-manager-add" type="submit">Ajouter</button>
+      </form>
+
+      <form *ngIf="walletAddType === 'private-key'" (ngSubmit)="ajouterPortefeuille()">
+        <label for="private-wallet-name">Nom du portefeuille</label>
+        <input id="private-wallet-name" name="privateName" [(ngModel)]="walletNameInput" maxlength="64" required />
+        <label for="private-wallet-key">Clé privée</label>
+        <input id="private-wallet-key" name="privateKey" type="password" [(ngModel)]="walletPrivateKeyInput" autocomplete="off" spellcheck="false" required />
+        <button type="button" class="wallet-add-secondary" (click)="previsualiserClePrivee()">Vérifier l’adresse localement</button>
+        <p *ngIf="walletPrivateKeyPreview" class="wallet-add-preview">Adresse dérivée : <code>{{ walletPrivateKeyPreview }}</code></p>
+        <label for="private-wallet-password">Mot de passe du coffre</label>
+        <input id="private-wallet-password" name="privatePassword" type="password" [(ngModel)]="walletVaultPassword" autocomplete="current-password" required />
+        <p class="wallet-add-note">La clé ne quitte jamais ce navigateur. Seul un keystore chiffré par le mot de passe du coffre sera enregistré.</p>
+        <button class="wallet-manager-add" type="submit" [disabled]="!walletPrivateKeyPreview">Chiffrer et ajouter</button>
+      </form>
+
+      <form *ngIf="walletAddType === 'mnemonic'" (ngSubmit)="ajouterPortefeuille()">
+        <label for="mnemonic-wallet-name">Nom des comptes</label>
+        <input id="mnemonic-wallet-name" name="mnemonicName" [(ngModel)]="walletNameInput" maxlength="64" required />
+        <label for="mnemonic-wallet-phrase">Phrase de récupération</label>
+        <textarea id="mnemonic-wallet-phrase" name="mnemonicPhrase" [(ngModel)]="walletMnemonicInput" autocomplete="off" spellcheck="false" required></textarea>
+        <button type="button" class="wallet-add-secondary" (click)="previsualiserPhrase(walletMnemonicStartIndex)">Dériver les adresses localement</button>
+        <fieldset *ngIf="walletMnemonicPreviews.length" class="wallet-mnemonic-accounts">
+          <legend>Sélectionner les comptes à ajouter</legend>
+          <div class="wallet-mnemonic-pagination">
+            <button type="button" [disabled]="walletMnemonicStartIndex === 0" (click)="previsualiserPhrase(walletMnemonicStartIndex - 5)">5 précédents</button>
+            <span>Comptes {{ walletMnemonicStartIndex + 1 }}–{{ walletMnemonicStartIndex + 5 }}</span>
+            <button type="button" (click)="previsualiserPhrase(walletMnemonicStartIndex + 5)">5 suivants</button>
+          </div>
+          <label *ngFor="let preview of walletMnemonicPreviews">
+            <input type="checkbox" name="mnemonic-account-{{ preview.index }}" [(ngModel)]="preview.selected" />
+            Compte {{ preview.index + 1 }} · <code>{{ preview.address }}</code>
+          </label>
+        </fieldset>
+        <label for="mnemonic-wallet-password">Mot de passe du coffre</label>
+        <input id="mnemonic-wallet-password" name="mnemonicPassword" type="password" [(ngModel)]="walletVaultPassword" autocomplete="current-password" required />
+        <p class="wallet-add-note">La phrase sert uniquement à la dérivation locale; chaque clé sélectionnée est chiffrée avant son stockage.</p>
+        <button class="wallet-manager-add" type="submit" [disabled]="!walletMnemonicPreviews.length">Chiffrer et ajouter</button>
+      </form>
+    </div>
+
+    <footer class="wallet-manager-footer">
+      <button type="button" (click)="fermerGestionnairePortefeuilles(); ouvrirParametres()">Paramètres</button>
+      <button type="button" (click)="chargerSoldePortefeuilles()">Actualiser les soldes</button>
+    </footer>
+  </aside>
+
+  <p class="v3-nav-message" role="status" aria-live="polite" *ngIf="messageNavigation">{{ messageNavigation }}</p>
+
   <main *ngIf="vueActive === 'wallet'" class="content v3-content">
-    <div class="v3-heading"><div><p class="v3-eyebrow">VOTRE ESPACE DIGEVRA</p><h1>Tableau de bord</h1><p class="v3-muted">Gérez votre portefeuille et consultez son activité.</p></div><span class="v3-test-badge">{{ nomReseau }}</span><button type="button" class="explorer-button" [disabled]="networkSwitchInProgress || balanceLoading" (click)="actualiserSolde()" aria-label="Actualiser le solde et l’état du réseau">Actualiser</button></div>
-    <p class="v3-network-warning" role="status" *ngIf="modeDemonstration">Mode démonstration : aucun RPC ni indexeur HTTPS n’est configuré. Les soldes et l’historique réels sont indisponibles, et les envois sont désactivés.</p>
-    <section class="v3-account card" aria-label="Compte actif"><div class="v3-avatar">W1</div><div class="v3-account-copy"><strong>Portefeuille principal</strong><span>{{ raccourcirAdresse(adresseWallet) }}</span></div><span class="v3-account-tag">Actif</span><button type="button" class="v3-icon-button" (click)="copierAdresse()" aria-label="Copier l'adresse">⧉</button></section>
-    <p class="v3-inline-note" *ngIf="messageCopie">{{ messageCopie }}</p>
+    <section class="v3-greeting" aria-label="Bienvenue">
+      <p>Bonjour <span aria-hidden="true">👋</span></p>
+      <h1>Bienvenue sur DIGEVRA.</h1>
+    </section>
     <div class="v3-layout">
       <div class="v3-primary-column">
-        <section class="v3-balance card"><div class="v3-token-header"><div class="v3-token-icon">DGV</div><div><strong>DIGEVRA</strong><span>Solde lu depuis le RPC du réseau sélectionné</span></div><span class="v3-chevron">›</span></div><div class="v3-balance-caption">SOLDE DISPONIBLE</div><div class="v3-balance-number" *ngIf="balanceLoading; else v3BalanceValue">Actualisation…</div><ng-template #v3BalanceValue><div class="v3-balance-number" *ngIf="rpcConnected && soldeDgvDisplay !== '—'; else v3Unavailable">{{ soldeDgvDisplay }} <small>{{ soldeDgvSymbol }}</small></div></ng-template><ng-template #v3Unavailable><div class="v3-balance-number v3-balance-unavailable">{{ rpcConnected ? (soldeDgvMessage || 'Solde non configuré sur ce réseau') : 'Solde indisponible — réseau déconnecté' }}</div></ng-template><div class="v3-balance-footer" *ngIf="soldeDgvMessage && rpcConnected">{{ soldeDgvMessage }}</div><div class="v3-balance-footer" *ngIf="!soldeDgvMessage">Aucune conversion USD non vérifiée</div></section>
-        <div class="v3-actions"><button type="button" class="v3-action" [disabled]="modeDemonstration || !rpcConnected" (click)="ouvrirEnvoi()"><span class="v3-action-icon">↑</span><strong>Envoyer</strong><small>{{ modeDemonstration ? 'Désactivé en démonstration' : 'Transférer des DGV' }}</small></button><button type="button" class="v3-action" (click)="ouvrirReception()"><span class="v3-action-icon">↓</span><strong>Recevoir</strong><small>Adresse et QR code</small></button></div>
+        <section class="v3-balance card" aria-label="Solde du portefeuille DIGEVRA">
+          <div class="v3-token-header">
+            <div class="v3-token-icon" aria-hidden="true">DGV</div>
+            <div><strong>DIGEVRA</strong><span>Votre solde sur {{ nomReseau }}</span></div>
+            <img class="v3-balance-art" src="digevra-mark.png" alt="" width="90" height="76" />
+          </div>
+          <div class="v3-balance-caption-row">
+            <div class="v3-balance-caption">SOLDE DISPONIBLE</div>
+            <button type="button" class="v3-balance-toggle" (click)="soldeMasque = !soldeMasque" [attr.aria-label]="soldeMasque ? 'Afficher le solde' : 'Masquer le solde'" [attr.aria-pressed]="soldeMasque">
+              <svg *ngIf="!soldeMasque" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg *ngIf="soldeMasque" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 5.2A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a15 15 0 0 1-3.1 3.8M6.2 6.2C3.5 8 2 12 2 12s3.5 7 10 7c1.1 0 2.1-.2 3-.5"/></svg>
+            </button>
+          </div>
+          <div class="v3-balance-number" *ngIf="soldeMasque; else v3VisibleBalance" aria-live="polite">•••••• <small>DGV</small></div>
+          <ng-template #v3VisibleBalance>
+            <div class="v3-balance-number" *ngIf="balanceLoading; else v3BalanceValue" aria-live="polite">Actualisation…</div>
+            <ng-template #v3BalanceValue>
+              <div class="v3-balance-number" *ngIf="rpcConnected && soldeDgvDisplay !== '—'; else v3SnapshotOrUnavailable">{{ soldeDgvPresentation }} <small>{{ soldeDgvSymbol }}</small></div>
+              <ng-template #v3SnapshotOrUnavailable>
+                <div class="v3-balance-number" *ngIf="snapshotVisible; else v3Unavailable">{{ soldeDgvPresentation }} <small>DGV</small></div>
+              </ng-template>
+            </ng-template>
+            <ng-template #v3Unavailable><div class="v3-balance-number v3-balance-unavailable">{{ rpcConnected ? (soldeDgvMessage || 'Solde non configuré sur ce réseau') : 'Solde indisponible — réseau déconnecté' }}</div></ng-template>
+          </ng-template>
+          <div
+            class="v3-balance-fiat"
+            *ngIf="!soldeMasque && activeNetworkKey === 'digevra-local' && (rpcConnected || snapshotVisible)"
+            aria-live="polite">
+            <strong *ngIf="dgvUsdEstimatedValue as estimatedValue; else unavailableDgvUsd">
+              {{ estimatedValue }}
+            </strong>
+            <ng-template #unavailableDgvUsd>
+              <span class="v3-balance-fiat-unavailable">Valeur en dollars indisponible</span>
+            </ng-template>
+            <small>Valeur indicative</small>
+          </div>
+          <p class="v3-snapshot-stale" role="status" *ngIf="snapshotVisible && !rpcConnected">
+            Données non actualisées · Dernière synchronisation {{ snapshot?.syncedAt | date:'medium' }} · Bloc {{ snapshot?.lastBlockNumber }}
+          </p>
+          <p class="v3-network-warning" role="status" *ngIf="snapshotWarning">{{ snapshotWarning }}</p>
+          <div class="v3-balance-footer" *ngIf="soldeDgvMessage && rpcConnected">{{ soldeDgvMessage }}</div>
+          <div class="v3-balance-footer" *ngIf="!soldeDgvMessage && rpcConnected && adresseWallet">Solde réel lu depuis la blockchain</div>
+          <button type="button" class="v3-balance-refresh" (click)="actualiserSolde()" [disabled]="networkSwitchInProgress || balanceLoading" aria-label="Actualiser le solde">Actualiser le solde <span aria-hidden="true">↻</span></button>
+          <p class="v3-network-warning" role="status" *ngIf="modeDemonstration">Mode démonstration : aucun RPC ni indexeur HTTPS n’est configuré. Seul un snapshot vérifié peut rester consultable, avec son état non actualisé; les envois sont désactivés.</p>
+        </section>
+        <div class="v3-actions" aria-label="Actions du portefeuille">
+          <button type="button" class="v3-action" [disabled]="modeDemonstration || !rpcConnected || activeWalletReadOnly" (click)="ouvrirEnvoi()"><span class="v3-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></span><strong>Envoyer</strong><small>{{ activeWalletReadOnly ? 'Lecture seule' : 'Transférer des DGV' }}</small></button>
+          <button type="button" class="v3-action" (click)="ouvrirReception()"><span class="v3-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14m6-6-6 6-6-6"/></svg></span><strong>Recevoir</strong><small>Obtenir des DGV</small></button>
+          <button type="button" class="v3-action v3-coming-soon" disabled aria-label="Swapper, bientôt disponible"><span class="v3-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 7 3-3 3 3M4 7h6a4 4 0 0 1 4 4m3 6-3 3-3-3m9 0h-6a4 4 0 0 1-4-4"/></svg></span><strong>Swapper</strong><small>Bientôt disponible</small></button>
+          <button type="button" class="v3-action v3-coming-soon" disabled aria-label="Acheter, bientôt disponible"><span class="v3-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg></span><strong>Acheter</strong><small>Bientôt disponible</small></button>
+        </div>
         <section class="card v3-recent">
           <div class="v3-section-heading">
-            <h2>Transactions récentes</h2>
+            <h2>Historique des transactions</h2>
             <button type="button" (click)="ouvrirActivite()">Voir tout →</button>
           </div>
+          <p class="v3-snapshot-stale" role="status" *ngIf="snapshotVisible && !rpcConnected">
+            Historique DIGEVRA non actualisé · Dernière synchronisation
+            {{ snapshot?.syncedAt | date:'medium' }} · Bloc {{ snapshot?.lastBlockNumber }}
+          </p>
           <p class="v3-empty" *ngIf="transactionsLoading">Chargement de l’historique indexé…</p>
           <p class="v3-empty" *ngIf="transactionsError">Historique indisponible : {{ transactionsError }}</p>
           <p class="v3-empty" *ngIf="transactionsState === 'syncing'">
@@ -104,20 +373,28 @@
             Historique non chargé.
           </p>
           <div class="v3-tx" *ngFor="let tx of transactions | slice:0:4">
-            <span class="v3-tx-icon">{{ estEnvoyee(tx) ? '↑' : '↓' }}</span>
+            <span class="v3-tx-icon" [class.sent]="estEnvoyee(tx)" [class.received]="!estEnvoyee(tx)" aria-hidden="true">{{ estEnvoyee(tx) ? '↑' : '↓' }}</span>
             <div class="v3-tx-copy">
               <strong>{{ estEnvoyee(tx) ? 'Envoi' : 'Réception' }}</strong>
-              <small>{{ raccourcirAdresse(estEnvoyee(tx) ? tx.to : tx.from) }} · bloc {{ tx.blockNumber }}</small>
-              <small>Frais : {{ tx.feeDgv }} DGV · {{ tx.status === 1 ? 'Confirmée' : 'Échouée' }}</small>
+              <small class="v3-tx-address"><span>De</span><code [title]="tx.from || 'Adresse masquée'" [attr.aria-label]="tx.from ? 'Adresse de provenance ' + tx.from : 'Adresse de provenance masquée'">{{ tx.from ? raccourcirAdresse(tx.from) : 'Adresse masquée' }}</code></small>
+              <small class="v3-tx-address"><span>Vers</span><code [title]="tx.to || 'Adresse indisponible'" [attr.aria-label]="'Adresse de destination ' + (tx.to || 'indisponible')">{{ tx.to ? raccourcirAdresse(tx.to) : 'Adresse indisponible' }}</code></small>
+              <small>Bloc {{ tx.blockNumber }} · {{ obtenirDate(tx) | date:'short' }}</small>
+              <small><span class="v3-tx-status" [class.failed]="tx.status !== 1">{{ tx.status === 1 ? 'Confirmée' : 'Échouée' }}</span> · Frais : {{ tx.feeDgv }} DGV</small>
             </div>
-            <button type="button" class="v3-tx-value" (click)="ouvrirTransaction(tx.hash)">
+            <button type="button" class="v3-tx-value" [class.sent]="estEnvoyee(tx)" [class.received]="!estEnvoyee(tx)" (click)="ouvrirTransaction(tx.hash)" [attr.aria-label]="'Voir la transaction de ' + (estEnvoyee(tx) ? 'envoi' : 'réception') + ' de ' + tx.valueDgv + ' DGV'">
               {{ estEnvoyee(tx) ? '-' : '+' }}{{ tx.valueDgv }} DGV
             </button>
           </div>
         </section>
       </div>
-      <aside class="v3-secondary-column"><section class="card v3-network"><div class="v3-section-heading"><h2>Réseau actif</h2><span [class.v3-offline]="!reseauEnLigne" class="v3-status">{{ reseauEnLigne ? 'RPC connecté' : 'RPC déconnecté' }}</span></div><div class="v3-network-title"><span class="v3-network-symbol">◈</span><div><strong>{{ nomReseau }}</strong><small>Chain ID configuré {{ chainId }} · réel {{ actualChainId ?? 'non vérifié' }}</small></div></div><div class="network-row"><span>Endpoint utilisé</span><code>{{ rpcEndpointDisplay }}</code></div><div class="network-row"><span>Consensus déclaré</span><strong>{{ consensus }}</strong></div><div class="network-row"><span>Dernier bloc</span><button class="network-link" [disabled]="!rpcConnected" (click)="ouvrirBloc(dernierBloc)">{{ rpcConnected ? dernierBloc : '—' }}</button></div><div class="network-row"><span>Transactions indexées (wallet)</span><strong>{{ transactionsTotal }}</strong></div><div class="network-row"><span>Indexeur</span><strong>{{ transactionsState }}</strong></div><div class="network-row" *ngIf="transactionsIndexedThrough !== null"><span>Indexé jusqu’au bloc</span><strong>{{ transactionsIndexedThrough }}</strong></div><p class="v3-network-warning" *ngIf="transactionsError">Indexeur indisponible : {{ transactionsError }}</p><p class="v3-network-warning" *ngIf="!transactionsHistoryComplete && !transactionsError">L’exhaustivité de l’historique dépend de la synchronisation depuis le bloc genesis.</p><p class="v3-network-warning">Sepolia n'est pas configuré. Ne pas y envoyer de fonds.</p><button class="explorer-button" [disabled]="!explorerUrl" (click)="ouvrirExplorer()">Ouvrir DIGEVRA Explorer ↗</button></section></aside>
     </div>
+    <aside class="v3-secondary-column" aria-label="DIGEVRA Explorer">
+      <section class="v3-explorer-banner">
+        <div class="v3-explorer-art" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="m24 3 18 10.5v21L24 45 6 34.5v-21L24 3Z"/><path d="m15 17 9-5 9 5v14l-9 5-9-5V17Z"/><path d="m15 17 9 5 9-5M24 22v14"/></svg></div>
+        <div class="v3-explorer-copy"><span>DIGEVRA EXPLORER</span><strong>Explorez l’écosystème DIGEVRA.</strong><small>DApps, NFTs, Paiements et plus encore.</small></div>
+        <button type="button" [disabled]="!explorerUrl" (click)="ouvrirExplorer()">Explorer maintenant <span aria-hidden="true">→</span></button>
+      </section>
+    </aside>
   </main>
 
   <!-- =========================
@@ -152,6 +429,10 @@
         Connectez d'abord un wallet.
       </div>
 
+      <p class="v3-snapshot-stale" role="status" *ngIf="snapshotVisible && !rpcConnected">
+        Données DIGEVRA non actualisées · Dernière synchronisation
+        {{ snapshot?.syncedAt | date:'medium' }} · Bloc {{ snapshot?.lastBlockNumber }}
+      </p>
       <div *ngIf="transactionsLoading" class="empty-state" aria-live="polite">
         Chargement des transactions indexées…
       </div>
@@ -195,13 +476,10 @@
             }}
           </strong>
 
-          <span>
-            {{
-              raccourcirAdresse(
-                estEnvoyee(tx) ? tx.to : tx.from
-              )
-            }}
-          </span>
+          <div class="activity-addresses">
+            <span><small>De</small><code [title]="tx.from || 'Adresse masquée'" [attr.aria-label]="tx.from ? 'Adresse de provenance ' + tx.from : 'Adresse de provenance masquée'">{{ tx.from ? raccourcirAdresse(tx.from) : 'Adresse masquée' }}</code></span>
+            <span><small>Vers</small><code [title]="tx.to || 'Adresse indisponible'" [attr.aria-label]="'Adresse de destination ' + (tx.to || 'indisponible')">{{ tx.to ? raccourcirAdresse(tx.to) : 'Adresse indisponible' }}</code></span>
+          </div>
 
         </div>
 
@@ -498,12 +776,11 @@
 
   </main>
 
-  <nav class="v3-mobile-nav" aria-label="Navigation mobile">
-    <button [class.active]="vueActive === 'wallet'" (click)="ouvrirWalletView()"><span>⌂</span>Accueil</button>
-    <button [class.active]="vueActive === 'activite'" (click)="ouvrirActivite()"><span>◷</span>Historique</button>
-    <button [disabled]="modeDemonstration || !rpcConnected" (click)="ouvrirEnvoi()"><span>↑</span>Envoyer</button>
-    <button [class.active]="vueActive === 'parametres'" (click)="ouvrirParametres()"><span>⚙</span>Paramètres</button>
-    <button (click)="ouvrirExplorer()"><span>↗</span>Explorer</button>
+  <nav class="v3-mobile-nav" aria-label="Navigation principale">
+    <button type="button" [class.active]="vueActive === 'wallet'" [attr.aria-current]="vueActive === 'wallet' ? 'page' : null" (click)="ouvrirWalletView()"><span aria-hidden="true">⌂</span>Accueil</button>
+    <button type="button" [class.active]="vueActive === 'activite'" [attr.aria-current]="vueActive === 'activite' ? 'page' : null" (click)="ouvrirActivite()"><span aria-hidden="true">◷</span>Portefeuille</button>
+    <button type="button" (click)="afficherBientotDisponible('NFT')"><span aria-hidden="true">◇</span>NFT</button>
+    <button type="button" [class.active]="vueActive === 'parametres'" [attr.aria-current]="vueActive === 'parametres' ? 'page' : null" (click)="ouvrirParametres()"><span aria-hidden="true">•••</span>Plus</button>
   </nav>
 
 </div>

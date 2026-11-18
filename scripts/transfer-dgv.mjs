@@ -15,11 +15,11 @@ import {
 export const RPC_URL = 'http://127.0.0.1:9545';
 export const EXPECTED_CHAIN_ID = 20261019n;
 export const EXPECTED_SENDER = '0xEe0a8b0441A0559760eC384313fcAf8cC582Bb75';
-export const TRANSFER_AMOUNT = parseEther('100');
+export const TRANSFER_AMOUNT = parseEther('10000');
 export const BLOCK_PROGRESS_TIMEOUT_MS = 30_000;
 export const BLOCK_POLL_INTERVAL_MS = 2_000;
 
-export function parseArguments(argv) {
+export function parseArguments(argv, expectedSender = EXPECTED_SENDER) {
   const parsed = { recipient: '', keystorePath: '', broadcast: false };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -51,7 +51,7 @@ export function parseArguments(argv) {
   }
   parsed.recipient = getAddress(parsed.recipient);
 
-  if (parsed.recipient.toLowerCase() === EXPECTED_SENDER.toLowerCase()) {
+  if (parsed.recipient.toLowerCase() === expectedSender.toLowerCase()) {
     throw new Error('Le destinataire doit être différent de l’expéditeur.');
   }
 
@@ -84,7 +84,12 @@ export async function prepareTransfer(
   provider,
   signer,
   recipient,
-  { waitForProgress = waitForBlockProgress, verifiedBlockProgress } = {}
+  {
+    waitForProgress = waitForBlockProgress,
+    verifiedBlockProgress,
+    expectedSender = EXPECTED_SENDER,
+    amount = TRANSFER_AMOUNT
+  } = {}
 ) {
   if (!isAddress(recipient)) {
     throw new Error('Adresse destinataire complète invalide.');
@@ -92,7 +97,7 @@ export async function prepareTransfer(
   recipient = getAddress(recipient);
 
   const signerAddress = getAddress(await signer.getAddress());
-  if (signerAddress.toLowerCase() !== EXPECTED_SENDER.toLowerCase()) {
+  if (signerAddress.toLowerCase() !== expectedSender.toLowerCase()) {
     throw new Error('La clé locale ne correspond pas à l’adresse expéditrice attendue.');
   }
   if (recipient.toLowerCase() === signerAddress.toLowerCase()) {
@@ -130,7 +135,7 @@ export async function prepareTransfer(
     provider.estimateGas({
       from: signerAddress,
       to: recipient,
-      value: TRANSFER_AMOUNT
+      value: amount
     })
   ]);
 
@@ -150,7 +155,7 @@ export async function prepareTransfer(
 
   const bufferedGasLimit = (gasLimit * 120n + 99n) / 100n;
   const estimatedFee = bufferedGasLimit * maxFeePerGas;
-  const totalRequired = TRANSFER_AMOUNT + estimatedFee;
+  const totalRequired = amount + estimatedFee;
   if (senderBalance < totalRequired) {
     throw new Error('Solde expéditeur insuffisant pour le montant et les frais estimés.');
   }
@@ -168,7 +173,7 @@ export async function prepareTransfer(
     legacyGasPrice: feeData.maxFeePerGas == null ? feeData.gasPrice : null,
     estimatedFee,
     totalRequired,
-    amount: TRANSFER_AMOUNT
+    amount
   };
 }
 
@@ -212,7 +217,7 @@ function promptHidden(label) {
   });
 }
 
-async function loadSigner(keystorePath) {
+export async function loadSigner(keystorePath) {
   if (keystorePath) {
     let keystore;
     try {
@@ -253,14 +258,15 @@ export function printSummary(plan, broadcast, write = (message) => stdout.write(
   write(`Solde expéditeur requis (montant + frais) : ${formatEther(plan.totalRequired)} DGV\n`);
 }
 
-async function confirmBroadcast(recipient) {
+async function confirmBroadcast(recipient, amount = TRANSFER_AMOUNT) {
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error('Envoi refusé : confirmation interactive explicite requise.');
   }
 
   const confirmation = createInterface({ input: stdin, output: stdout });
   try {
-    const requiredText = `ENVOYER 100 DGV À ${recipient}`;
+    const amountText = formatEther(amount).replace(/\.0$/, '');
+    const requiredText = `ENVOYER ${amountText} DGV À ${recipient}`;
     const answer = await confirmation.question(
       `Pour diffuser la transaction, saisissez exactement : ${requiredText}\n> `
     );
@@ -276,10 +282,10 @@ export async function executeTransfer({
   provider,
   signer,
   plan,
-  confirm = (to) => confirmBroadcast(to),
+  confirm = (to, amount) => confirmBroadcast(to, amount),
   write = (message) => stdout.write(message)
 }) {
-  await confirm(plan.recipient);
+  await confirm(plan.recipient, plan.amount);
   const transaction = await signer.sendTransaction({
     to: plan.recipient,
     value: plan.amount,
@@ -299,14 +305,14 @@ export async function executeTransfer({
     receipt.status !== 1 ||
     transaction.from.toLowerCase() !== plan.signerAddress.toLowerCase() ||
     transaction.to?.toLowerCase() !== plan.recipient.toLowerCase() ||
-    transaction.value !== TRANSFER_AMOUNT
+    transaction.value !== plan.amount
   ) {
     throw new Error('Reçu absent ou transaction confirmée différente du transfert demandé.');
   }
 
   const recipientBalanceAfter = await provider.getBalance(plan.recipient);
   const recipientBalanceIncrease = recipientBalanceAfter - plan.recipientBalanceBefore;
-  if (recipientBalanceIncrease < TRANSFER_AMOUNT) {
+  if (recipientBalanceIncrease < plan.amount) {
     throw new Error('Le solde destinataire n’a pas augmenté du montant transféré après confirmation.');
   }
   write(`Transaction confirmée dans le bloc ${receipt.blockNumber}.\n`);
@@ -322,7 +328,10 @@ export async function runTransfer(
     loadSigner: getSigner = loadSigner,
     waitForProgress = waitForBlockProgress,
     confirm,
-    write = (message) => stdout.write(message)
+    write = (message) => stdout.write(message),
+    expectedSender = EXPECTED_SENDER,
+    amount = TRANSFER_AMOUNT,
+    requireSignerForSimulation = true
   }
 ) {
   const network = await provider.getNetwork();
@@ -334,12 +343,16 @@ export async function runTransfer(
 
   const initialBlock = await provider.getBlockNumber();
   const latestBlock = await waitForProgress(provider, initialBlock);
-  const loadedSigner = await getSigner(args.keystorePath);
+  const loadedSigner = args.broadcast || requireSignerForSimulation
+    ? await getSigner(args.keystorePath)
+    : { getAddress: async () => expectedSender };
   const signer = typeof loadedSigner.connect === 'function'
     ? loadedSigner.connect(provider)
     : loadedSigner;
   const plan = await prepareTransfer(provider, signer, args.recipient, {
-    verifiedBlockProgress: { initialBlock, latestBlock }
+    verifiedBlockProgress: { initialBlock, latestBlock },
+    expectedSender,
+    amount
   });
 
   printSummary(plan, args.broadcast, write);

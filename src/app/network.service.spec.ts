@@ -52,6 +52,9 @@ describe('NetworkService RPC helpers', () => {
     const provider = {
       getNetwork: vi.fn().mockResolvedValue({ chainId: 20261019n }),
       getBlockNumber: vi.fn().mockResolvedValue(321),
+      getBlock: vi.fn().mockResolvedValue({
+        hash: NETWORKS['digevra-local'].genesisHash
+      }),
       getCode: vi.fn().mockResolvedValue('0x')
     } as unknown as JsonRpcProvider;
 
@@ -61,6 +64,7 @@ describe('NetworkService RPC helpers', () => {
       provider,
       chainId: 20261019,
       blockNumber: 321,
+      genesisHash: NETWORKS['digevra-local'].genesisHash,
       smartWalletDeployed: false
     });
   });

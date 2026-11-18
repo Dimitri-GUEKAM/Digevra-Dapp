@@ -15,10 +15,65 @@ The checked-in `public/digevra-config.js` deliberately selects `demo` mode and
 contains no RPC or indexer endpoint. GitHub Pages cannot host the local Besu
 node or Node.js indexer. In demo mode, the interfaces show that live blockchain
 data is unavailable, do not fabricate balances or history, and disable sending.
-To enable live data later, configure only an accessible HTTPS RPC endpoint and
-HTTPS read-only indexer API in this public runtime configuration, verify CORS
-and Chain ID `20261019`, and switch `deploymentMode` to `live`. Never publish
-admin RPC endpoints, keys, or credentials.
+To enable live data later, configure accessible public HTTPS RPC and indexer
+endpoints in this public runtime configuration, verify CORS and Chain ID
+`20261019`, and switch `deploymentMode` to `live`. The Pages build rejects
+missing, non-HTTPS, loopback, and private-network endpoints in live mode; demo
+mode must keep both backend URLs empty. Never publish admin RPC endpoints,
+keys, or credentials.
+
+The wallet's USD estimate reads `dgvUsdIndicativeRate` from
+`public/digevra-config.js`. It is currently configured to `0.25` (indicative
+USD per DGV), an internal demonstration rate rather than an official market
+quote. For example, 5,000 DGV is calculated as `$1,250.00`. Update that single
+configuration value to change the rate. The display is labeled **Valeur
+indicative** and is calculated from the selected wallet's live DGV balance or
+its clearly stale verified snapshot; it is hidden with the balance privacy
+toggle and is not shown for Sepolia.
+
+### Public DIGEVRA snapshots and offline display
+
+The wallet caches verified DIGEVRA data in browser storage, separately keyed by
+Chain ID and wallet address. When the RPC is unavailable, the dashboard may show
+that address's last complete snapshot with a visible **Données non actualisées**
+label, synchronization time, and block number. It does not treat the snapshot as
+live data, enable network actions, or use it for Sepolia. Browser storage is
+device-local; viewing data on another device requires a manually published
+static snapshot on Pages.
+
+Only addresses listed in `public/snapshots/digevra/manifest.json` may be
+published. That file is a public allowlist: authorize an address only after
+deciding that its balance, transaction history, and verified sender/recipient
+addresses may be public. Generate a snapshot from the running DIGEVRA RPC and a
+ready, fully synchronized indexer:
+
+```powershell
+node .\scripts\update-digevra-snapshot.mjs --address 0x35b4336eF00eD099e030D29f925f2C69FD86b912
+```
+
+The script checks Chain ID `20261019`, the configured genesis hash, indexer
+health and completeness, block hash, transaction contents and sender/recipient,
+address relevance, duplicate hashes, block timestamps, and transaction receipts
+before atomically writing
+`public/snapshots/digevra/<address>.json`. It is read-only and does not publish,
+commit, or send a transaction. Review the generated public JSON, then publish
+only through a separately authorized Pages workflow. Never put keys or
+recovery phrases in the snapshot. Sender and recipient addresses are public
+blockchain data but remain identifying public activity; review them before
+publishing.
+
+For temporary tests while the PC and local services are running, the optional
+Cloudflare Quick Tunnel preflight is:
+
+```powershell
+.\scripts\start-digevra-test-tunnel.ps1
+```
+
+It checks Besu, genesis, indexer, and Explorer before forwarding HTTPS traffic to
+the Explorer's rate-limited, read-only RPC proxy. The tunnel URL is temporary,
+changes, and depends on the PC remaining on; it is not a production endpoint or
+a replacement for persistently hosted Besu nodes. Besu is not exposed directly,
+and administrative RPC methods are not allowed.
 
 Build and validate the same artifact used by GitHub Actions:
 
@@ -28,6 +83,7 @@ npx tsc -p tsconfig.spec.json --noEmit
 npm test -- --watch=false
 npm run test:explorer
 npm run test:indexer
+npm run test:snapshot-generator
 npm run build:pages
 ```
 
@@ -92,6 +148,22 @@ doit être vérifié avant de les prendre en charge.
 
 ## Préparer un transfert DGV local
 
+Le script distinct `scripts/transfer-9000-dgv.mjs` prépare exactement
+9 000 DGV vers le portefeuille DIGEVRA existant indiqué dans le script.
+L’exécution par défaut est une simulation en lecture seule : elle vérifie le
+Chain ID, les blocs, les soldes et les frais sans demander de clé privée et sans
+diffuser de transaction.
+
+```powershell
+node .\scripts\transfer-9000-dgv.mjs --to 0x35b4336eF00eD099e030D29f925f2C69FD86b912
+```
+
+Après vérification manuelle et autorisation explicite, `--send` demande la clé
+uniquement dans la console locale, sans écho, vérifie que l’adresse dérivée est
+`0xEe0a8b0441A0559760eC384313fcAf8cC582Bb75`, puis exige la confirmation
+exacte `ENVOYER 9000 DGV À 0x35b4336eF00eD099e030D29f925f2C69FD86b912` avant
+signature et diffusion. La commande d’envoi n’est pas exécutée par défaut.
+
 Le script `scripts/transfer-dgv.mjs` est en simulation par défaut. Il demande une
 adresse destinataire complète (`--to`), vérifie le RPC, le Chain ID, la
 progression des blocs, l’adresse du signataire, le solde et les frais. Le secret
@@ -117,16 +189,18 @@ node .\scripts\transfer-dgv.mjs --to 0x35b4336eF00eD099e030D29f925f2C69FD86b912 
 ```
 
 Les options `--send` et `--broadcast` activent toutes deux le mode d’envoi, sans
-changer la simulation par défaut. Le mode `--send` exige la saisie locale masquée de la clé, puis affiche le
+changer la simulation par défaut. Le script prépare exactement 10 000 DGV et
+le mode `--send` exige la saisie locale masquée de la clé, puis affiche le
 récapitulatif actualisé et demande de saisir exactement
-`ENVOYER 100 DGV À 0x35b4336eF00eD099e030D29f925f2C69FD86b912` avant signature
+`ENVOYER 10000 DGV À 0x35b4336eF00eD099e030D29f925f2C69FD86b912` avant signature
 et diffusion. La commande n’a pas été exécutée dans le cadre de cette
 préparation. Un keystore chiffré existant peut remplacer la saisie de clé avec
 `--keystore C:\chemin\vers\keystore.json`.
 
 Les keystores, clés et fichiers secrets sont exclus de Git par `.gitignore`.
-Les tests du script se lancent avec `node --test scripts/transfer-dgv.test.mjs`;
-ils utilisent uniquement des fournisseurs simulés, sans diffusion réseau.
+Les tests des scripts se lancent avec
+`node --test scripts/transfer-*-dgv.test.mjs`; ils utilisent uniquement des
+fournisseurs simulés, sans diffusion réseau.
 
 ## DIGEVRA Indexer (historique blockchain)
 

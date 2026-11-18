@@ -21,6 +21,7 @@ export interface VerifiedNetworkConnection {
   provider: JsonRpcProvider;
   chainId: number;
   blockNumber: number;
+  genesisHash: string | null;
   smartWalletDeployed: boolean;
 }
 
@@ -47,13 +48,14 @@ export function resolveRpcUrl(
 
 export async function readNativeBalance(
   provider: JsonRpcProvider,
-  address: string
+  address: string,
+  blockTag?: number | string
 ): Promise<string> {
   if (!isAddress(address)) {
     throw new Error('Adresse du portefeuille invalide.');
   }
 
-  return formatEther(await provider.getBalance(address));
+  return formatEther(await provider.getBalance(address, blockTag));
 }
 
 export function assertExpectedChainId(
@@ -67,23 +69,40 @@ export function assertExpectedChainId(
   }
 }
 
+export function assertExpectedGenesisHash(
+  expectedGenesisHash: string,
+  actualGenesisHash: string | null | undefined
+): void {
+  if (
+    !actualGenesisHash ||
+    actualGenesisHash.toLowerCase() !== expectedGenesisHash.toLowerCase()
+  ) {
+    throw new Error('Hash genesis inattendu pour le réseau DIGEVRA.');
+  }
+}
+
 export async function verifyProviderConnection(
   config: NetworkConfig,
   provider: JsonRpcProvider
 ): Promise<VerifiedNetworkConnection> {
   const network = await provider.getNetwork();
   assertExpectedChainId(config.chainId, network.chainId);
-  const [blockNumber, smartWalletCode] = await Promise.all([
+  const [blockNumber, genesisBlock, smartWalletCode] = await Promise.all([
     provider.getBlockNumber(),
+    config.genesisHash ? provider.getBlock(0) : Promise.resolve(null),
     config.smartWalletAddress
       ? provider.getCode(config.smartWalletAddress)
       : Promise.resolve('0x')
   ]);
+  if (config.genesisHash) {
+    assertExpectedGenesisHash(config.genesisHash, genesisBlock?.hash);
+  }
 
   return {
     provider,
     chainId: Number(network.chainId),
     blockNumber,
+    genesisHash: genesisBlock?.hash ?? null,
     smartWalletDeployed: smartWalletCode !== '0x'
   };
 }
@@ -92,9 +111,10 @@ export async function verifyProviderConnection(
 export class NetworkService {
   getNativeBalance(
     provider: JsonRpcProvider,
-    address: string
+    address: string,
+    blockTag?: number | string
   ): Promise<string> {
-    return readNativeBalance(provider, address);
+    return readNativeBalance(provider, address, blockTag);
   }
 
   async connect(config: NetworkConfig): Promise<VerifiedNetworkConnection> {
@@ -132,7 +152,11 @@ export class NetworkService {
       return await verifyProviderConnection(config, provider);
     } catch (error) {
       provider.destroy();
-      if (error instanceof Error && error.message.startsWith('Chain ID inattendu')) {
+      if (
+        error instanceof Error &&
+        (error.message.startsWith('Chain ID inattendu') ||
+          error.message.startsWith('Hash genesis inattendu'))
+      ) {
         throw error;
       }
 

@@ -26,7 +26,9 @@
               }
             ],
             "styles": [
-              "src/styles.css"
+              "src/styles.css",
+              "src/app/app.css",
+              "src/app/dashboard-refresh.css"
             ]
           },
           "configurations": {

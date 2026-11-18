@@ -10,7 +10,8 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "test:explorer": "node --test explorer/*.test.mjs",
-    "test:indexer": "node --test indexer/*.test.mjs"
+    "test:indexer": "node --test indexer/*.test.mjs",
+    "test:snapshot-generator": "node --test scripts/update-digevra-snapshot.test.mjs"
   },
   "private": true,
   "packageManager": "npm@11.19.1",

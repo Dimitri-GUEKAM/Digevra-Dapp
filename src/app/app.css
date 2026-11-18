@@ -2,7 +2,7 @@
   box-sizing: border-box;
 }
 
-:host {
+app-root {
   display: block;
   min-height: 100vh;
   background:
@@ -948,16 +948,16 @@ button {
 
 }
 
-/* Authentification DIGEVRA : isolée du tableau de bord */
+/* Authentification DIGEVRA : isolÃ©e du tableau de bord */
 .auth-shell{min-height:100dvh;background:#080811;color:#f7f4ff;display:grid;place-items:center;padding:24px;font-family:system-ui,sans-serif}
 .auth-card{width:min(100%,460px);padding:30px;border:1px solid #302342;border-radius:25px;background:#11101d;box-shadow:0 18px 70px #0008}
-.auth-card h1{text-align:center;font-size:30px;margin:15px 0 8px}.auth-card p{color:#b2aabd;line-height:1.5}.auth-mark{margin:auto;width:76px;height:76px;border-radius:22px;background:linear-gradient(135deg,#8b5cf6,#12d7a5);display:grid;place-items:center;font-weight:900;color:#090914;font-size:23px}
+.auth-card h1{text-align:center;font-size:30px;margin:15px 0 8px}.auth-card p{color:#b2aabd;line-height:1.5}.auth-mark{margin:auto;width:76px;height:76px;border-radius:22px;background:linear-gradient(135deg,#c782ff,#7135b2);display:grid;place-items:center;font-weight:900;color:#fff;font-size:23px;box-shadow:0 10px 30px #8b3cf455}
 .auth-card input:not([type=checkbox]),.auth-card textarea{display:block;width:100%;box-sizing:border-box;background:#090911;color:white;border:1px solid #504363;border-radius:13px;padding:15px;margin:12px 0;font:inherit}.auth-card textarea{min-height:95px}
 .auth-primary,.auth-secondary{width:100%;padding:15px;border-radius:13px;margin:9px 0;font-size:16px;font-weight:700;cursor:pointer}.auth-primary{background:#a776fa;color:#140c23;border:0}.auth-secondary{background:transparent;color:#c6a5ff;border:1px solid #73519b}.auth-primary:disabled{opacity:.5;cursor:not-allowed}.auth-back{background:none;color:#c6a5ff;border:0;margin-top:12px;cursor:pointer}.auth-error{color:#ff8c9b!important}.recovery-box{border:1px solid #9d6ad4;border-radius:12px;padding:14px;margin-top:20px}.recovery-words{padding:12px;background:#080711;word-spacing:8px;line-height:2;border-radius:8px}.auth-lock{position:fixed;right:12px;bottom:12px;z-index:9999;background:#6d42a4;color:white;border:0;border-radius:10px;padding:11px;cursor:pointer}
 
 
-/* DIGEVRA V2 — responsive progressive enhancement (sans changer la logique métier) */
-:host { overflow-x: clip; }
+/* DIGEVRA V2 â€” responsive progressive enhancement (sans changer la logique mÃ©tier) */
+app-root { overflow-x: clip; }
 .app { width: 100%; }
 button { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, input:focus-visible, textarea:focus-visible {
@@ -1065,7 +1065,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
 
-/* DIGEVRA — OPTIONS D'AUTHENTIFICATION */
+/* DIGEVRA â€” OPTIONS D'AUTHENTIFICATION */
 
 .welcome-actions {
   display: flex;
@@ -1112,8 +1112,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 }
 
 
-/* DIGEVRA V3 — dashboard responsive, ne modifie pas l'authentification */
-:host{background:#080710;color:#f6f3ff}
+/* DIGEVRA V3 â€” dashboard responsive, ne modifie pas l'authentification */
+app-root{background:#080710;color:#f6f3ff}
 .app{background:radial-gradient(ellipse at 80% -10%,#26113c 0%,transparent 45%),#080710;min-height:100dvh}
 .v3-topbar{max-width:1380px;margin-bottom:30px}
 .v3-topbar .logo{background:linear-gradient(145deg,#b15aff,#6422be);box-shadow:0 0 24px #8b3cf455}
@@ -1153,6 +1153,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .v3-balance-number small{font-size:.46em;color:#bfb1d0}
 .v3-balance-unavailable{font-size:26px;color:#e4b6b6}
 .v3-balance-footer{margin-top:14px;color:#8d829e;font-size:12px}
+.v3-snapshot-stale{margin:12px 0;padding:11px 13px;border:1px solid #705438;border-radius:12px;background:#30251d;color:#f0c98e;font-size:12px;line-height:1.55}
 .v3-actions{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:18px 0}
 .v3-action{background:#161221;border:1px solid #3b2b4b;border-radius:20px;color:#fff;min-height:142px;padding:22px;display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:7px;transition:border-color .2s,transform .2s}
 .v3-action:hover{border-color:#a452f4;transform:translateY(-2px)}

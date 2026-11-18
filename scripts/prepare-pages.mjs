@@ -1,4 +1,5 @@
 import { access, copyFile, mkdir, readFile } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 
 const root = process.cwd();
@@ -26,6 +27,68 @@ const walletHtml = await readFile(resolve(output, 'index.html'), 'utf8');
 const explorerHtml = await readFile(resolve(explorerOutput, 'index.html'), 'utf8');
 const config = await readFile(resolve(output, 'digevra-config.js'), 'utf8');
 
+function readStringProperty(name) {
+  const value = config.match(new RegExp(`\\b${name}:\\s*'([^']*)'`));
+  if (!value) {
+    throw new Error(`Pages runtime configuration is missing ${name}.`);
+  }
+  return value[1];
+}
+
+function assertPublicHttpsEndpoint(value, name) {
+  let endpoint;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    throw new Error(`${name} must be a valid public HTTPS URL.`);
+  }
+
+  const hostname = endpoint.hostname.toLowerCase();
+  const address = hostname.replace(/^\[|\]$/g, '');
+  const privateIpv4 = isIP(address) === 4 && (() => {
+    const [first, second, third] = address.split('.').map(Number);
+    return first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      (first === 100 && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 192 && second === 0 && (third === 0 || third === 2)) ||
+      (first === 192 && second === 88 && third === 99) ||
+      (first === 198 && (second === 18 || second === 19 || second === 51 && third === 100)) ||
+      (first === 203 && second === 0 && third === 113) ||
+      first >= 224;
+  })();
+  const privateIpv6 = isIP(address) === 6 && (
+    address === '::' ||
+    address === '::1' ||
+    address.startsWith('fc') ||
+    address.startsWith('fd') ||
+    address.startsWith('fe8') ||
+    address.startsWith('fe9') ||
+    address.startsWith('fea') ||
+    address.startsWith('feb') ||
+    address.startsWith('ff') ||
+    !/^[23]/.test(address) ||
+    address.startsWith('2001:db8:')
+  );
+
+  if (
+    endpoint.protocol !== 'https:' ||
+    endpoint.username ||
+    endpoint.password ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    privateIpv4 ||
+    privateIpv6
+  ) {
+    throw new Error(`${name} must be a public HTTPS endpoint, not a local or private address.`);
+  }
+}
+
 if (!walletHtml.includes('<base href="/Digevra-Dapp/">')) {
   throw new Error('Wallet build has an unexpected GitHub Pages base href.');
 }
@@ -33,14 +96,23 @@ if (!explorerHtml.includes('href="./styles.css"') ||
     !explorerHtml.includes('src="./explorer.js"')) {
   throw new Error('Explorer assets must use relative paths for GitHub Pages.');
 }
-if (!/deploymentMode:\s*'demo'/.test(config) ||
-    !/chainId:\s*20261019/.test(config) ||
-    !/rpcUrl:\s*''/.test(config) ||
-    !/indexerApiUrl:\s*''/.test(config)) {
-  throw new Error('Pages must remain in demo mode until HTTPS backends are configured.');
+if (!/\bchainId:\s*20261019\b/.test(config)) {
+  throw new Error('Pages runtime configuration must use Chain ID 20261019.');
 }
-if (/https?:\/\/(localhost|127\.0\.0\.1)/i.test(config)) {
-  throw new Error('Public runtime configuration must not contain local endpoints.');
+
+const deploymentMode = readStringProperty('deploymentMode');
+const rpcUrl = readStringProperty('rpcUrl');
+const indexerApiUrl = readStringProperty('indexerApiUrl');
+
+if (deploymentMode === 'demo') {
+  if (rpcUrl || indexerApiUrl) {
+    throw new Error('Demo mode must not contain live RPC or indexer endpoints.');
+  }
+} else if (deploymentMode === 'live') {
+  assertPublicHttpsEndpoint(rpcUrl, 'rpcUrl');
+  assertPublicHttpsEndpoint(indexerApiUrl, 'indexerApiUrl');
+} else {
+  throw new Error('Pages deploymentMode must be either demo or live.');
 }
 
 console.log(`GitHub Pages artifact prepared: ${output}`);

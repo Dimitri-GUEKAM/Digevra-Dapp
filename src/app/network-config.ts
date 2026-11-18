@@ -6,6 +6,8 @@ export interface DigevraRuntimeConfig {
   chainId: number;
   rpcUrl: string;
   indexerApiUrl: string;
+  publicSnapshotAddresses?: string[];
+  dgvUsdIndicativeRate?: number | null;
   walletUrl: string | null;
   explorerUrl: string | null;
 }
@@ -45,6 +47,7 @@ export interface NetworkConfig {
   name: string;
   chainId: number;
   rpcUrl: string;
+  genesisHash?: string;
   rpcRequiresConfiguration: boolean;
   nativeCurrency: {
     name: string;
@@ -65,6 +68,7 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
     key: 'digevra-local',
     name: 'DIGEVRA Local',
     chainId: 20261019,
+    genesisHash: '0xb6448c0fac400f410a13813a9757faec163bb41d9a75e454466ba2c3116ed04e',
     rpcUrl: developmentMode
       ? ''
       : runtimeConfig?.rpcUrl?.trim() ?? '',

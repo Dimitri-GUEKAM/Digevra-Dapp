@@ -59,11 +59,73 @@ test('serves the Explorer and proxies indexer and read-only Besu requests', asyn
 
   const chainId = await fetch(`${explorerUrl}/rpc`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: 'https://dimitri-guekam.github.io'
+    },
     body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_chainId', params: [], id: 1 })
   });
   assert.equal(chainId.status, 200);
+  assert.equal(
+    chainId.headers.get('access-control-allow-origin'),
+    'https://dimitri-guekam.github.io'
+  );
   assert.equal((await chainId.json()).result, '0x135289b');
+
+  const genesis = await fetch(`${explorerUrl}/rpc`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'eth_getBlockByNumber',
+      params: ['0x0', false],
+      id: 3
+    })
+  });
+  assert.equal(genesis.status, 200);
+
+  for (const [method, params] of [
+    ['eth_getBalance', ['0x35b4336eF00eD099e030D29f925f2C69FD86b912', '0x7adb']],
+    ['eth_getBlockByNumber', ['0x7adb', false]]
+  ]) {
+    const historicalRead = await fetch(`${explorerUrl}/rpc`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 4 })
+    });
+    assert.equal(historicalRead.status, 200);
+  }
+
+  const malformedBlockTag = await fetch(`${explorerUrl}/rpc`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'eth_getBlockByNumber',
+      params: ['0x07adb', false],
+      id: 5
+    })
+  });
+  assert.equal(malformedBlockTag.status, 400);
+
+  const preflight = await fetch(`${explorerUrl}/rpc`, {
+    method: 'OPTIONS',
+    headers: {
+      origin: 'https://dimitri-guekam.github.io',
+      'access-control-request-method': 'POST',
+      'access-control-request-headers': 'content-type'
+    }
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(
+    preflight.headers.get('access-control-allow-methods'),
+    'POST, OPTIONS'
+  );
+
+  const deniedOrigin = await fetch(`${explorerUrl}/api/stats`, {
+    headers: { origin: 'https://attacker.example' }
+  });
+  assert.equal(deniedOrigin.status, 403);
 
   const blockedMethod = await fetch(`${explorerUrl}/rpc`, {
     method: 'POST',
@@ -77,6 +139,57 @@ test('serves the Explorer and proxies indexer and read-only Besu requests', asyn
   });
   assert.equal(blockedMethod.status, 400);
 
+  const blockedAdminMethod = await fetch(`${explorerUrl}/rpc`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'admin_nodeInfo',
+      params: [],
+      id: 6
+    })
+  });
+  assert.equal(blockedAdminMethod.status, 400);
+
+  const sameOriginRpc = await fetch(`${explorerUrl}/rpc`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: explorerUrl
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'eth_blockNumber',
+      params: [],
+      id: 7
+    })
+  });
+  assert.equal(sameOriginRpc.status, 200);
+
   const blockedWrite = await fetch(`${explorerUrl}/api/stats`, { method: 'POST' });
   assert.equal(blockedWrite.status, 405);
+});
+
+test('rate limits requests through a public tunnel', async (context) => {
+  const apiServer = createServer((request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{}');
+  });
+  const apiUrl = await listen(apiServer);
+  const explorer = createExplorerServer({
+    apiBaseUrl: apiUrl,
+    corsOrigins: 'https://dimitri-guekam.github.io',
+    rateLimitMax: 1,
+    rateLimitWindowMs: 60_000
+  });
+  const explorerUrl = await listen(explorer);
+  context.after(async () => {
+    await Promise.all([close(explorer), close(apiServer)]);
+  });
+
+  const first = await fetch(`${explorerUrl}/api/health`);
+  const second = await fetch(`${explorerUrl}/api/health`);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 429);
+  assert.equal(second.headers.get('retry-after'), '60');
 });

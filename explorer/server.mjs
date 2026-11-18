@@ -13,25 +13,125 @@ const MIME_TYPES = new Map([
   ['.svg', 'image/svg+xml']
 ]);
 const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
+const BLOCK_TAG_PATTERN = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
 const READ_ONLY_RPC_METHODS = new Set([
   'eth_chainId',
   'eth_blockNumber',
-  'eth_getBalance'
+  'eth_getBalance',
+  'eth_getBlockByNumber',
+  'eth_getCode'
 ]);
+const DEFAULT_CORS_ORIGINS = [
+  'https://dimitri-guekam.github.io',
+  'http://localhost:4201',
+  'http://127.0.0.1:4201'
+];
+
+function parseCorsOrigins(value) {
+  const origins = (value ?? DEFAULT_CORS_ORIGINS.join(','))
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (origins.includes('*') || origins.some((origin) => {
+    try {
+      return new URL(origin).origin !== origin;
+    } catch {
+      return true;
+    }
+  })) {
+    throw new Error('DIGEVRA_CORS_ORIGINS must contain exact origins and cannot use "*".');
+  }
+  return new Set(origins);
+}
+
+function createRateLimiter(limit, windowMs, now = Date.now) {
+  if (!Number.isSafeInteger(limit) || limit < 1 ||
+      !Number.isSafeInteger(windowMs) || windowMs < 1000) {
+    throw new Error('Rate-limit settings must be positive safe integers.');
+  }
+  const buckets = new Map();
+  return (request) => {
+    const key = request.headers['cf-connecting-ip'] ??
+      request.socket.remoteAddress ??
+      'unknown';
+    const currentTime = now();
+    let bucket = buckets.get(key);
+    if (!bucket || currentTime - bucket.startedAt >= windowMs) {
+      bucket = { startedAt: currentTime, count: 0 };
+      buckets.set(key, bucket);
+    }
+    bucket.count += 1;
+    return bucket.count <= limit;
+  };
+}
+
+function setCorsHeaders(request, response, allowedOrigins, path) {
+  const origin = request.headers.origin;
+  const protocol = (request.headers['x-forwarded-proto'] ?? 'http')
+    .toString()
+    .split(',')[0]
+    .trim();
+  const sameOrigin = origin === `${protocol}://${request.headers.host}`;
+  if (origin && !allowedOrigins.has(origin) && !sameOrigin) return false;
+  if (origin) {
+    if (allowedOrigins.has(origin)) {
+      response.setHeader('access-control-allow-origin', origin);
+      response.setHeader('vary', 'Origin');
+      response.setHeader('access-control-allow-methods',
+        path === '/rpc' ? 'POST, OPTIONS' : 'GET, OPTIONS');
+      response.setHeader('access-control-allow-headers', 'Accept, Content-Type');
+      response.setHeader('access-control-max-age', '600');
+    }
+  }
+  return true;
+}
 
 export function createExplorerServer({
   staticRoot = ROOT,
   apiBaseUrl = 'http://127.0.0.1:3001',
-  rpcUrl = 'http://127.0.0.1:9545'
+  rpcUrl = 'http://127.0.0.1:9545',
+  corsOrigins = process.env.DIGEVRA_CORS_ORIGINS,
+  rateLimitMax = 120,
+  rateLimitWindowMs = 60_000
 } = {}) {
   const resolvedRoot = resolve(staticRoot);
+  const allowedOrigins = parseCorsOrigins(corsOrigins);
+  const allowRequest = createRateLimiter(rateLimitMax, rateLimitWindowMs);
   return createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+      if (!setCorsHeaders(request, response, allowedOrigins, '/api')) {
+        sendJson(response, 403, { error: 'Origin is not allowed.' });
+        return;
+      }
+      if (request.method === 'OPTIONS') {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      if (!allowRequest(request)) {
+        response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
+        sendJson(response, 429, { error: 'Request rate limit exceeded.' });
+        return;
+      }
       await proxyIndexer(request, response, apiBaseUrl);
       return;
     }
     if (url.pathname === '/rpc') {
+      if (!setCorsHeaders(request, response, allowedOrigins, '/rpc')) {
+        sendJson(response, 403, { error: 'Origin is not allowed.' });
+        return;
+      }
+      if (request.method === 'OPTIONS') {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      if (!allowRequest(request)) {
+        response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
+        sendJson(response, 429, { error: 'Request rate limit exceeded.' });
+        return;
+      }
       await proxyReadOnlyRpc(request, response, rpcUrl);
       return;
     }
@@ -164,10 +264,24 @@ function validRpcParams(method, params) {
   if (method === 'eth_chainId' || method === 'eth_blockNumber') {
     return params.length === 0;
   }
-  return params.length === 2 &&
-    typeof params[0] === 'string' &&
-    ADDRESS_PATTERN.test(params[0]) &&
-    params[1] === 'latest';
+  if (method === 'eth_getBalance') {
+    return params.length === 2 &&
+      typeof params[0] === 'string' &&
+      ADDRESS_PATTERN.test(params[0]) &&
+      (params[1] === 'latest' ||
+        typeof params[1] === 'string' && BLOCK_TAG_PATTERN.test(params[1]));
+  }
+  if (method === 'eth_getCode') {
+    return params.length === 2 &&
+      typeof params[0] === 'string' &&
+      ADDRESS_PATTERN.test(params[0]) &&
+      params[1] === 'latest';
+  }
+  return method === 'eth_getBlockByNumber' &&
+    params.length === 2 &&
+    (params[0] === 'latest' ||
+      typeof params[0] === 'string' && BLOCK_TAG_PATTERN.test(params[0])) &&
+    params[1] === false;
 }
 
 function sendJson(response, status, value) {
@@ -186,7 +300,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   const server = createExplorerServer({
     apiBaseUrl: process.env.INDEXER_API_URL ?? 'http://127.0.0.1:3001',
-    rpcUrl: process.env.DIGEVRA_RPC_URL ?? 'http://127.0.0.1:9545'
+    rpcUrl: process.env.DIGEVRA_RPC_URL ?? 'http://127.0.0.1:9545',
+    corsOrigins: process.env.DIGEVRA_CORS_ORIGINS
   });
   server.listen(port, '127.0.0.1', () => {
     console.log(`DIGEVRA Explorer listening on http://localhost:${port}`);

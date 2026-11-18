@@ -37,7 +37,7 @@ test('simulation checks the transfer plan without requesting confirmation or bro
     getNetwork: async () => ({ chainId: 20261019n }),
     getBlockNumber: async () => (blockReads++ === 0 ? 100 : 102),
     getBalance: async (address) => address.toLowerCase() === EXPECTED_SENDER.toLowerCase()
-      ? parseEther('500')
+      ? parseEther('20000')
       : parseEther('2'),
     getFeeData: async () => ({
       maxFeePerGas: 2_000_000_000n,
@@ -79,12 +79,12 @@ test('simulation checks the transfer plan without requesting confirmation or bro
   assert.match(output.join(''), /SIMULATION — aucune transaction diffusée/);
 });
 
-test('prepares exactly 100 DGV when chain, block progress, and funds are verified', async () => {
+test('prepares exactly 10000 DGV when chain, block progress, and funds are verified', async () => {
   const provider = {
     getNetwork: async () => ({ chainId: 20261019n }),
     getBlockNumber: async () => 100,
     getBalance: async (address) => address.toLowerCase() === EXPECTED_SENDER.toLowerCase()
-      ? parseEther('500')
+      ? parseEther('20000')
       : parseEther('2'),
     getFeeData: async () => ({
       maxFeePerGas: 2_000_000_000n,
@@ -137,11 +137,11 @@ test('refuses a transfer when blocks do not progress', async () => {
   );
 });
 
-test('refuses insufficient amount-plus-fee balance', async () => {
+test('refuses the verified source balance because 10000 DGV plus fees exceed it', async () => {
   const provider = {
     getNetwork: async () => ({ chainId: 20261019n }),
     getBlockNumber: async () => 101,
-    getBalance: async () => parseEther('100'),
+    getBalance: async () => parseEther('9979.078999998473211'),
     getFeeData: async () => ({
       maxFeePerGas: 2_000_000_000n,
       maxPriorityFeePerGas: 1_000_000_000n,
@@ -174,7 +174,7 @@ test('does not send if explicit confirmation is rejected', async () => {
   );
 });
 
-test('sends exactly 100 DGV after confirmation and verifies the recipient balance increase', async () => {
+test('sends exactly 10000 DGV after confirmation and verifies the recipient balance increase', async () => {
   const balanceBefore = parseEther('2');
   const provider = {
     getBalance: async () => balanceBefore + TRANSFER_AMOUNT
@@ -192,7 +192,7 @@ test('sends exactly 100 DGV after confirmation and verifies the recipient balanc
   const signer = {
     sendTransaction: async (request) => {
       assert.equal(request.to, recipient);
-      assert.equal(request.value, parseEther('100'));
+      assert.equal(request.value, parseEther('10000'));
       return transaction;
     }
   };

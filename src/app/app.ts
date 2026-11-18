@@ -25,14 +25,79 @@ import {
   isDemoDeployment,
   NetworkKey
 } from './network-config';
-import { NetworkService } from './network.service';
+import {
+  assertExpectedChainId,
+  assertExpectedGenesisHash,
+  NetworkService
+} from './network.service';
 import { IndexedTransaction, IndexerService } from './indexer.service';
+import {
+  DigevraSnapshot,
+  SnapshotService,
+  SnapshotTransaction,
+  toIndexedTransactions
+} from './snapshot.service';
 import { buildExplorerUrl, getExplorerBaseUrl } from '../../explorer/routes.js';
+import {
+  ManagedWalletKind,
+  PRIMARY_WALLET_ID,
+  readStoredWalletAccounts,
+  SELECTED_WALLET_STORAGE_KEY,
+  StoredWalletAccount,
+  WALLET_ACCOUNTS_STORAGE_KEY,
+  writeStoredWalletAccounts
+} from './wallet-store';
 
 function formatBalanceAmount(amount: string): string {
   const [whole, fraction = ''] = amount.split('.');
   const trimmedFraction = fraction.replace(/0+$/, '');
   return trimmedFraction ? `${whole}.${trimmedFraction}` : whole;
+}
+
+export function formatDgvBalanceDisplay(amount: string): string {
+  const [whole, fraction] = amount.split('.');
+  if (!/^\d+$/.test(whole)) return amount;
+  const groupedWhole = new Intl.NumberFormat('fr-FR', {
+    maximumFractionDigits: 0
+  }).format(BigInt(whole));
+  const normalizedFraction = fraction?.replace(/0+$/, '');
+  return normalizedFraction
+    ? `${groupedWhole},${normalizedFraction}`
+    : groupedWhole;
+}
+
+export function formatIndicativeDgvUsd(
+  balanceDgv: string,
+  rate: number | null | undefined
+): string | null {
+  if (
+    !/^\d+(?:\.\d{1,18})?$/.test(balanceDgv) ||
+    typeof rate !== 'number' ||
+    !Number.isFinite(rate) ||
+    rate <= 0
+  ) {
+    return null;
+  }
+  const toRatio = (decimal: string) => {
+    const match = decimal.match(/^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i);
+    if (!match) return null;
+    let numerator = BigInt(`${match[1]}${match[2] ?? ''}`);
+    let scale = (match[2]?.length ?? 0) - Number(match[3] ?? 0);
+    if (scale < 0) {
+      numerator *= 10n ** BigInt(-scale);
+      scale = 0;
+    }
+    return { numerator, denominator: 10n ** BigInt(scale) };
+  };
+  const balance = toRatio(balanceDgv);
+  const rateRatio = toRatio(String(rate));
+  if (!balance || !rateRatio) return null;
+  const numerator = balance.numerator * rateRatio.numerator * 100n;
+  const denominator = balance.denominator * rateRatio.denominator;
+  const cents = (numerator + denominator / 2n) / denominator;
+  const whole = cents / 100n;
+  const fraction = String(cents % 100n).padStart(2, '0');
+  return `≈ $${new Intl.NumberFormat('en-US').format(whole)}.${fraction}`;
 }
 
 interface PreparedNativeTransfer {
@@ -51,6 +116,22 @@ interface PreparedNativeTransfer {
   chainId: number;
 }
 
+interface AuthIndexerStatus {
+  state: 'starting' | 'syncing' | 'ready' | 'degraded';
+  chainId: number;
+  rpcConnected: boolean;
+  lastIndexedBlock: number | null;
+  chainHead: number | null;
+  historyComplete: boolean;
+}
+
+interface ManagedWallet extends StoredWalletAccount {
+  balanceDgv: string | null;
+  balanceLoading: boolean;
+}
+
+type AuthServiceStatus = 'not_checked' | 'checking' | 'connected' | 'unavailable';
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -58,12 +139,12 @@ interface PreparedNativeTransfer {
     CommonModule,
     FormsModule
   ],
-  templateUrl: './app.html',
-  styleUrl: './app.css'
+  templateUrl: './app.html'
 })
 export class App implements OnInit, OnDestroy {
 
   activeNetworkKey: NetworkKey = 'digevra-local';
+  readonly primaryWalletId = PRIMARY_WALLET_ID;
   chainId: number | null = null;
   rpcConnected = false;
   networkSwitchInProgress = false;
@@ -91,6 +172,40 @@ export class App implements OnInit, OnDestroy {
     return NETWORKS[this.activeNetworkKey];
   }
 
+  get snapshotVisible(): boolean {
+    return this.activeNetworkKey === 'digevra-local' &&
+      !!this.adresseWallet &&
+      this.snapshot?.address.toLowerCase() === this.adresseWallet.toLowerCase();
+  }
+
+  get dgvUsdIndicativeRate(): number | null {
+    const rate = globalThis.DIGEVRA_CONFIG?.dgvUsdIndicativeRate;
+    return typeof rate === 'number' && Number.isFinite(rate) && rate > 0
+      ? rate
+      : null;
+  }
+
+  get dgvUsdEstimatedValue(): string | null {
+    if (this.activeNetworkKey !== 'digevra-local') return null;
+    const balance = this.rpcConnected
+      ? this.soldeEth
+      : this.snapshotVisible
+        ? this.snapshot?.balanceDgv ?? null
+        : null;
+    return balance === null
+      ? null
+      : formatIndicativeDgvUsd(balance, this.dgvUsdIndicativeRate);
+  }
+
+  get soldeDgvPresentation(): string {
+    const balance = this.rpcConnected && this.soldeDgvDisplay !== '—'
+      ? this.soldeDgvDisplay
+      : this.snapshotVisible
+        ? this.snapshot?.balanceDgv ?? '—'
+        : '—';
+    return balance === '—' ? balance : formatDgvBalanceDisplay(balance);
+  }
+
   // Libellé basé sur la configuration effective, pas sur une sélection visuelle.
   get nomReseau(): string {
     return this.activeNetwork.name;
@@ -112,6 +227,14 @@ export class App implements OnInit, OnDestroy {
     return this.activeNetwork.explorerUrl ?? '';
   }
 
+  get selectedWallet(): ManagedWallet | undefined {
+    return this.walletAccounts.find((wallet) => wallet.id === this.selectedWalletId);
+  }
+
+  get activeWalletReadOnly(): boolean {
+    return this.selectedWallet?.kind === 'watch';
+  }
+
   get modeDemonstration(): boolean {
     return isDemoDeployment(globalThis.DIGEVRA_CONFIG, isDevMode());
   }
@@ -122,6 +245,22 @@ export class App implements OnInit, OnDestroy {
     }
 
     return displayRpcEndpoint(this.activeNetwork.rpcUrl);
+  }
+
+  get indexerEndpointDisplay(): string {
+    if (isDevMode()) {
+      return '/api → Indexeur local';
+    }
+
+    return displayRpcEndpoint(globalThis.DIGEVRA_CONFIG?.indexerApiUrl ?? '');
+  }
+
+  get authSettingsRpcStatusLabel(): string {
+    return this.authSettingsStatusLabel(this.authSettingsRpcStatus);
+  }
+
+  get authSettingsIndexerStatusLabel(): string {
+    return this.authSettingsStatusLabel(this.authSettingsIndexerStatus);
   }
 
   get transactionUnavailableReason(): string {
@@ -156,6 +295,36 @@ export class App implements OnInit, OnDestroy {
   recoveryPhrase = '';
   authError = '';
   authBusy = false;
+  authSettingsOpen = false;
+  authSettingsRefreshing = false;
+  authSettingsRpcStatus: AuthServiceStatus = 'not_checked';
+  authSettingsRpcChainId: number | null = null;
+  authSettingsRpcBlock: number | null = null;
+  authSettingsRpcError = '';
+  authSettingsIndexerStatus: AuthServiceStatus = 'not_checked';
+  authSettingsIndexerStats: AuthIndexerStatus | null = null;
+  authSettingsIndexerError = '';
+  private authSettingsRequestId = 0;
+  vaultUnlocked = false;
+  walletManagerOpen = false;
+  walletAddOpen = false;
+  walletAddType: 'watch' | 'private-key' | 'mnemonic' | null = null;
+  walletManagerError = '';
+  walletManagerMessage = '';
+  walletAccounts: ManagedWallet[] = [];
+  selectedWalletId = '';
+  walletNameInput = '';
+  walletAddressInput = '';
+  walletPrivateKeyInput = '';
+  walletMnemonicInput = '';
+  walletVaultPassword = '';
+  walletPrivateKeyPreview = '';
+  walletMnemonicPreviews: Array<{ index: number; address: string; selected: boolean }> = [];
+  walletMnemonicStartIndex = 0;
+  editingWalletId = '';
+  editingWalletName = '';
+  private walletSigners = new Map<string, Wallet | HDNodeWallet>();
+  private walletBalanceRequestId = 0;
   recoveryAcknowledged = false;
   private unlockedWallet: Wallet | HDNodeWallet | null = null;
   private readonly vaultKey = 'digevra_vault_v1';
@@ -165,9 +334,14 @@ export class App implements OnInit, OnDestroy {
   sessionWallet: ReturnType<typeof Wallet.createRandom> | null = null;
   sessionAddress = '';
   soldeDgv = 0;
+  soldeMasque = false;
   walletDataError = '';
 
   transactions: IndexedTransaction[] = [];
+  snapshot: DigevraSnapshot | null = null;
+  publicSnapshots: DigevraSnapshot[] = [];
+  snapshotIsStale = true;
+  snapshotWarning = '';
 
   dernierBloc = 0;
   reseauEnLigne = false;
@@ -179,10 +353,12 @@ export class App implements OnInit, OnDestroy {
   qrCodeDataUrl = '';
   messageCopie = '';
   messageTransaction = '';
+  messageNavigation = '';
   transactionEnCours = false;
   dernierHashTransaction = '';
 
   private intervalId: ReturnType<typeof setInterval>;
+  private navigationMessageTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private signatureRequestTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private walletWindow: Window | null = null;
   private demandeTransactionId = '';
@@ -192,7 +368,8 @@ export class App implements OnInit, OnDestroy {
   constructor(
     private cdr: ChangeDetectorRef,
     private networkService: NetworkService,
-    private indexerService: IndexerService
+    private indexerService: IndexerService,
+    private snapshotService: SnapshotService
   ) {
     this.intervalId = setInterval(() => {
       void this.actualiserDonneesReseau();
@@ -201,6 +378,7 @@ export class App implements OnInit, OnDestroy {
 
   ngOnInit() {
     void this.changerReseau('digevra-local');
+    void this.chargerSnapshotsPublics();
     window.addEventListener(
       'message',
       this.recevoirMessageWallet
@@ -229,11 +407,187 @@ export class App implements OnInit, OnDestroy {
       /^0x[a-fA-F0-9]{40}$/.test(adresseSauvegardee)
     ) {
       this.adresseWallet = adresseSauvegardee;
+      void this.restaurerSnapshot(adresseSauvegardee);
       this.walletConnecte = false;
       this.sessionAutorisee = false;
       this.sessionWallet = null;
       this.sessionAddress = '';
       this.chargerWallet();
+    }
+  }
+
+  private async chargerSnapshotsPublics(): Promise<void> {
+    const addresses = globalThis.DIGEVRA_CONFIG?.publicSnapshotAddresses;
+    if (!Array.isArray(addresses)) return;
+
+    const authorizedAddresses = [...new Set(
+      addresses.filter((address) => isAddress(address)).map((address) => address.toLowerCase())
+    )];
+    if (!authorizedAddresses.length) return;
+
+    try {
+      const results = await Promise.all(authorizedAddresses.map((address) =>
+        this.snapshotService.load(address)
+      ));
+      this.publicSnapshots = results.flatMap((result) =>
+        result.snapshot ? [result.snapshot] : []
+      );
+      this.snapshotWarning = results
+        .map((result) => result.warning)
+        .filter(Boolean)
+        .join(' ');
+      if (!this.rpcConnected && this.adresseWallet) {
+        const selectedSnapshot = this.publicSnapshots.find((item) =>
+          item.address.toLowerCase() === this.adresseWallet.toLowerCase()
+        );
+        if (selectedSnapshot) this.appliquerSnapshot(selectedSnapshot);
+      }
+    } catch (error) {
+      this.snapshotWarning = error instanceof Error
+        ? error.message
+        : 'Les snapshots publics DIGEVRA ne peuvent pas être lus.';
+    }
+    this.cdr.detectChanges();
+  }
+
+  private async restaurerSnapshot(address: string): Promise<void> {
+    if (this.activeNetworkKey !== 'digevra-local' || !isAddress(address)) return;
+    try {
+      const result = await this.snapshotService.load(address);
+      if (
+        this.activeNetworkKey !== 'digevra-local' ||
+        address.toLowerCase() !== this.adresseWallet.toLowerCase()
+      ) {
+        return;
+      }
+      this.snapshotWarning = result.warning;
+      if (result.snapshot) this.appliquerSnapshot(result.snapshot);
+    } catch (error) {
+      this.snapshotWarning = error instanceof Error
+        ? error.message
+        : 'Le snapshot local DIGEVRA ne peut pas être lu.';
+    }
+    this.cdr.detectChanges();
+  }
+
+  private appliquerSnapshot(snapshot: DigevraSnapshot): void {
+    if (
+      this.activeNetworkKey !== 'digevra-local' ||
+      !this.adresseWallet ||
+      snapshot.address.toLowerCase() !== this.adresseWallet.toLowerCase()
+    ) {
+      return;
+    }
+    this.snapshot = snapshot;
+    this.snapshotIsStale = true;
+    this.soldeEth = snapshot.balanceDgv;
+    this.soldeDgv = Number(snapshot.balanceDgv);
+    this.soldeDgvDisplay = snapshot.balanceDgv;
+    this.soldeDgvSymbol = 'DGV';
+    this.soldeDgvMessage = 'Données non actualisées';
+    this.transactions = toIndexedTransactions(snapshot);
+    this.transactionsLoading = false;
+    this.transactionsTotal = snapshot.transactions.length;
+    this.transactionsPage = 0;
+    this.transactionsState = 'ready';
+    this.transactionsHistoryComplete = snapshot.historyComplete;
+    this.transactionsIndexedThrough = snapshot.lastBlockNumber;
+    this.transactionsError = '';
+  }
+
+  private async synchroniserSnapshot(
+    address: string,
+    provider: JsonRpcProvider
+  ): Promise<void> {
+    if (this.activeNetworkKey !== 'digevra-local' || !this.rpcConnected) return;
+    try {
+      const history = await this.indexerService.getCompleteAddressHistory(address);
+      if (
+        history.lastIndexedBlock > await provider.getBlockNumber() ||
+        provider !== this.rpcProvider ||
+        address.toLowerCase() !== this.adresseWallet.toLowerCase()
+      ) {
+        throw new Error('RPC, adresse ou indexeur a changé pendant la synchronisation du snapshot.');
+      }
+
+      const [network, genesis, block] = await Promise.all([
+        provider.getNetwork(),
+        provider.getBlock(0),
+        provider.getBlock(history.lastIndexedBlock)
+      ]);
+      assertExpectedChainId(this.activeNetwork.chainId, network.chainId);
+      assertExpectedGenesisHash(
+        this.activeNetwork.genesisHash ?? '',
+        genesis?.hash
+      );
+      if (!block || block.number !== history.lastIndexedBlock || !block.hash) {
+        throw new Error('Le bloc de fin d’indexation n’a pas pu être vérifié via le RPC.');
+      }
+
+      const previousSnapshot = this.snapshotService.readLocal(address);
+      if (previousSnapshot && previousSnapshot.lastBlockNumber > history.lastIndexedBlock) {
+        const previousBlock = await provider.getBlock(previousSnapshot.lastBlockNumber);
+        if (previousBlock?.hash?.toLowerCase() === previousSnapshot.lastBlockHash) {
+          return;
+        }
+      }
+
+      const balanceWei = await provider.getBalance(address, history.lastIndexedBlock);
+      const transactions: SnapshotTransaction[] = history.items.map((transaction) => {
+        const outgoing = transaction.from?.toLowerCase() === address.toLowerCase();
+        const incoming = transaction.to?.toLowerCase() === address.toLowerCase();
+        if (!outgoing && !incoming) {
+          throw new Error('L’indexeur a retourné une transaction d’une autre adresse.');
+        }
+        return {
+          hash: transaction.hash.toLowerCase(),
+          from: transaction.from,
+          to: transaction.to,
+          chainId: this.activeNetwork.chainId,
+          blockNumber: transaction.blockNumber,
+          transactionIndex: transaction.transactionIndex,
+          direction: outgoing ? 'outgoing' : 'incoming',
+          valueWei: transaction.valueWei,
+          valueDgv: transaction.valueDgv,
+          gasUsed: transaction.gasUsed,
+          effectiveGasPriceWei: transaction.effectiveGasPriceWei,
+          feeWei: transaction.feeWei,
+          feeDgv: transaction.feeDgv,
+          status: transaction.status,
+          timestamp: transaction.timestamp
+        };
+      });
+      const snapshot: DigevraSnapshot = {
+        schemaVersion: 1,
+        chainId: 20261019,
+        genesisHash: this.activeNetwork.genesisHash ?? '',
+        lastBlockNumber: block.number,
+        lastBlockHash: block.hash,
+        syncedAt: new Date().toISOString(),
+        address,
+        balanceWei: balanceWei.toString(),
+        balanceDgv: formatEther(balanceWei),
+        historyComplete: history.historyComplete,
+        transactions
+      };
+      this.snapshotService.saveLocal(snapshot);
+      if (
+        provider === this.rpcProvider &&
+        address.toLowerCase() === this.adresseWallet.toLowerCase()
+      ) {
+        this.snapshot = snapshot;
+        this.snapshotIsStale = false;
+        this.snapshotWarning = '';
+        this.cdr.detectChanges();
+      }
+    } catch (error) {
+      if (provider === this.rpcProvider && address.toLowerCase() === this.adresseWallet.toLowerCase()) {
+        this.snapshotIsStale = true;
+        this.snapshotWarning = error instanceof Error
+          ? error.message
+          : 'La synchronisation du snapshot DIGEVRA a échoué.';
+        this.cdr.detectChanges();
+      }
     }
   }
 
@@ -245,6 +599,12 @@ export class App implements OnInit, OnDestroy {
 
     const requestId = ++this.networkSwitchSequence;
     const config = NETWORKS[networkKey];
+    if (networkKey !== this.activeNetworkKey) {
+      this.snapshot = null;
+      this.snapshotIsStale = true;
+      this.snapshotWarning = '';
+      this.resetTransactionHistory();
+    }
     this.networkSwitchInProgress = true;
     this.networkError = '';
     this.rpcConnected = false;
@@ -252,6 +612,12 @@ export class App implements OnInit, OnDestroy {
     this.actualChainId = null;
     this.balanceLoading = false;
     this.soldeDgvDisplay = '—';
+    this.walletBalanceRequestId += 1;
+    this.walletAccounts = this.walletAccounts.map((account) => ({
+      ...account,
+      balanceDgv: null,
+      balanceLoading: false
+    }));
     this.soldeDgvMessage = this.adresseWallet
       ? 'Solde indisponible — réseau déconnecté'
       : '';
@@ -293,6 +659,9 @@ export class App implements OnInit, OnDestroy {
       if (this.adresseWallet) {
         await this.chargerWallet();
       }
+      if (this.vaultUnlocked) {
+        void this.chargerSoldePortefeuilles();
+      }
     } catch (error) {
       if (requestId === this.networkSwitchSequence) {
         this.networkError = error instanceof Error
@@ -305,6 +674,9 @@ export class App implements OnInit, OnDestroy {
         this.soldeDgvMessage = this.adresseWallet
           ? 'Solde indisponible — réseau déconnecté'
           : '';
+        if (this.activeNetworkKey === 'digevra-local' && this.adresseWallet) {
+          await this.restaurerSnapshot(this.adresseWallet);
+        }
       }
     } finally {
       if (requestId === this.networkSwitchSequence) {
@@ -320,12 +692,18 @@ export class App implements OnInit, OnDestroy {
     }
 
     try {
-      const [network, blockNumber] = await Promise.all([
+      const [network, blockNumber, genesis] = await Promise.all([
         this.rpcProvider.getNetwork(),
-        this.rpcProvider.getBlockNumber()
+        this.rpcProvider.getBlockNumber(),
+        this.activeNetwork.genesisHash
+          ? this.rpcProvider.getBlock(0)
+          : Promise.resolve(null)
       ]);
       if (network.chainId !== BigInt(this.activeNetwork.chainId)) {
         throw new Error('Le Chain ID RPC ne correspond plus au réseau actif.');
+      }
+      if (this.activeNetwork.genesisHash) {
+        assertExpectedGenesisHash(this.activeNetwork.genesisHash, genesis?.hash);
       }
       this.actualChainId = Number(network.chainId);
       this.dernierBloc = blockNumber;
@@ -341,6 +719,9 @@ export class App implements OnInit, OnDestroy {
       this.soldeDgvMessage = this.adresseWallet
         ? 'Solde indisponible — réseau déconnecté'
         : '';
+      if (this.activeNetworkKey === 'digevra-local' && this.adresseWallet) {
+        void this.restaurerSnapshot(this.adresseWallet);
+      }
     }
     this.cdr.detectChanges();
   }
@@ -351,6 +732,89 @@ export class App implements OnInit, OnDestroy {
     this.authPassword = '';
     this.authConfirm = '';
     this.authPhrase = '';
+  }
+
+  async basculerParametresAuth(): Promise<void> {
+    this.authSettingsOpen = !this.authSettingsOpen;
+    if (this.authSettingsOpen) {
+      await this.actualiserParametresAuth();
+    }
+  }
+
+  fermerParametresAuth(): void {
+    this.authSettingsOpen = false;
+  }
+
+  private authSettingsStatusLabel(status: AuthServiceStatus): string {
+    switch (status) {
+      case 'checking':
+        return 'Vérification…';
+      case 'connected':
+        return 'Connecté';
+      case 'unavailable':
+        return 'Indisponible';
+      case 'not_checked':
+        return 'Non vérifié';
+    }
+  }
+
+  async actualiserParametresAuth(): Promise<void> {
+    const requestId = ++this.authSettingsRequestId;
+    this.authSettingsRefreshing = true;
+    this.authSettingsRpcStatus = 'checking';
+    this.authSettingsRpcChainId = null;
+    this.authSettingsRpcBlock = null;
+    this.authSettingsRpcError = '';
+    this.authSettingsIndexerStatus = 'checking';
+    this.authSettingsIndexerStats = null;
+    this.authSettingsIndexerError = '';
+
+    const [rpcResult, indexerResult] = await Promise.allSettled([
+      this.networkService.connect(this.activeNetwork),
+      this.indexerService.getStats<AuthIndexerStatus>()
+    ]);
+
+    if (rpcResult.status === 'fulfilled') {
+      this.networkService.destroy(rpcResult.value.provider);
+    }
+    if (requestId !== this.authSettingsRequestId) {
+      return;
+    }
+
+    if (rpcResult.status === 'fulfilled') {
+      this.authSettingsRpcChainId = rpcResult.value.chainId;
+      this.authSettingsRpcBlock = rpcResult.value.blockNumber;
+      this.authSettingsRpcStatus = 'connected';
+    } else {
+      this.authSettingsRpcStatus = 'unavailable';
+      this.authSettingsRpcError = rpcResult.reason instanceof Error
+        ? rpcResult.reason.message
+        : 'État RPC indisponible.';
+    }
+
+    if (indexerResult.status === 'fulfilled') {
+      const stats = indexerResult.value;
+      this.authSettingsIndexerStats = stats;
+      if (stats.chainId !== this.activeNetwork.chainId) {
+        this.authSettingsIndexerStatus = 'unavailable';
+        this.authSettingsIndexerError =
+          `Chain ID inattendu : reçu ${stats.chainId}, attendu ${this.activeNetwork.chainId}.`;
+      } else if (!stats.rpcConnected || stats.state === 'degraded') {
+        this.authSettingsIndexerStatus = 'unavailable';
+        this.authSettingsIndexerError =
+          'L’indexeur ne confirme pas sa connexion au RPC.';
+      } else {
+        this.authSettingsIndexerStatus = 'connected';
+      }
+    } else {
+      this.authSettingsIndexerStatus = 'unavailable';
+      this.authSettingsIndexerError = indexerResult.reason instanceof Error
+        ? indexerResult.reason.message
+        : 'État de l’indexeur indisponible.';
+    }
+
+    this.authSettingsRefreshing = false;
+    this.cdr.detectChanges();
     this.recoveryAcknowledged = false;
   }
 
@@ -406,10 +870,75 @@ export class App implements OnInit, OnDestroy {
     this.authBusy = true;
     try {
       const wallet = await Wallet.fromEncryptedJson(encrypted, this.authPassword);
-      this.unlockedWallet = wallet;
+      const storedAccounts = readStoredWalletAccounts(localStorage);
+      const primaryMetadata = storedAccounts.find(
+        (account) => account.id === PRIMARY_WALLET_ID
+      );
+      if (
+        primaryMetadata &&
+        (primaryMetadata.kind !== 'primary' ||
+          primaryMetadata.address.toLowerCase() !== wallet.address.toLowerCase())
+      ) {
+        throw new Error('Les métadonnées du portefeuille principal ne correspondent pas au coffre existant.');
+      }
+
+      const signers = new Map<string, Wallet | HDNodeWallet>([
+        [PRIMARY_WALLET_ID, wallet]
+      ]);
+      const managedAccounts: ManagedWallet[] = [{
+        id: PRIMARY_WALLET_ID,
+        name: primaryMetadata?.name ?? 'Portefeuille principal',
+        address: wallet.address,
+        kind: 'primary',
+        balanceDgv: null,
+        balanceLoading: false
+      }];
+
+      for (const account of storedAccounts) {
+        if (account.id === PRIMARY_WALLET_ID) continue;
+        if (account.kind === 'primary') {
+          throw new Error('Un portefeuille secondaire est incorrectement marqué comme principal.');
+        }
+        if (managedAccounts.some((item) =>
+          item.address.toLowerCase() === account.address.toLowerCase()
+        )) {
+          throw new Error('La liste locale contient une adresse déjà présente dans le coffre principal.');
+        }
+        if (account.kind === 'private-key' || account.kind === 'mnemonic') {
+          const storedKeystore = account.encryptedJson;
+          if (!storedKeystore) {
+            throw new Error(`Le keystore chiffré du compte « ${account.name} » est absent.`);
+          }
+          const signer = await Wallet.fromEncryptedJson(
+            storedKeystore,
+            this.authPassword
+          );
+          if (signer.address.toLowerCase() !== account.address.toLowerCase()) {
+            throw new Error(`L’adresse dérivée du compte « ${account.name} » ne correspond pas à ses métadonnées.`);
+          }
+          signers.set(account.id, signer);
+        }
+        managedAccounts.push({
+          ...account,
+          balanceDgv: null,
+          balanceLoading: false
+        });
+      }
+
+      const selectedId = localStorage.getItem(SELECTED_WALLET_STORAGE_KEY);
+      const selected = managedAccounts.find((account) => account.id === selectedId)
+        ?? managedAccounts[0];
+      this.walletSigners = signers;
+      this.walletAccounts = managedAccounts;
+      this.selectedWalletId = selected.id;
+      this.unlockedWallet = signers.get(selected.id) ?? null;
+      this.vaultUnlocked = true;
       this.authPassword = '';
       this.authError = '';
-      this.adresseWallet = wallet.address;
+      this.walletManagerError = '';
+      this.adresseWallet = selected.address;
+      this.snapshot = null;
+      this.snapshotIsStale = true;
       this.walletConnecte = true;
       // La signature via session Smart Wallet externe n'est PAS autorisée ici.
       this.sessionAutorisee = false;
@@ -417,12 +946,459 @@ export class App implements OnInit, OnDestroy {
       this.sessionAddress = '';
       this.resetTransactionHistory();
       this.chargerWallet();
-    } catch { this.authError = 'Mot de passe incorrect ou coffre illisible.'; }
+      void this.chargerSoldePortefeuilles();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '';
+      const detailedError = [
+        'métadonnées',
+        'keystore chiffré',
+        'entrée',
+        'liste locale',
+        'portefeuille secondaire'
+      ].some((message) => errorMessage.includes(message));
+      this.authError = detailedError
+        ? errorMessage
+        : 'Mot de passe incorrect ou coffre illisible. Le coffre principal n’a pas été modifié.';
+      this.walletSigners.clear();
+      this.walletAccounts = [];
+      this.selectedWalletId = '';
+      this.unlockedWallet = null;
+      this.vaultUnlocked = false;
+    }
     finally { this.authBusy = false; this.cdr.detectChanges(); }
+  }
+
+  ouvrirGestionnairePortefeuilles(): void {
+    if (!this.vaultUnlocked) return;
+    this.walletManagerOpen = true;
+    this.walletManagerError = '';
+    this.walletManagerMessage = '';
+    void this.chargerSoldePortefeuilles();
+  }
+
+  fermerGestionnairePortefeuilles(): void {
+    this.walletManagerOpen = false;
+    this.fermerAjoutPortefeuille();
+  }
+
+  ouvrirAjoutPortefeuille(kind: 'watch' | 'private-key' | 'mnemonic'): void {
+    if (!this.vaultUnlocked) return;
+    this.walletAddType = kind;
+    this.walletAddOpen = true;
+    this.walletManagerError = '';
+    this.walletManagerMessage = '';
+    this.walletNameInput = '';
+    this.walletAddressInput = '';
+    this.walletPrivateKeyInput = '';
+    this.walletMnemonicInput = '';
+    this.walletVaultPassword = '';
+    this.walletPrivateKeyPreview = '';
+    this.walletMnemonicPreviews = [];
+    this.walletMnemonicStartIndex = 0;
+  }
+
+  fermerAjoutPortefeuille(): void {
+    this.walletAddOpen = false;
+    this.walletAddType = null;
+    this.walletAddressInput = '';
+    this.walletPrivateKeyInput = '';
+    this.walletMnemonicInput = '';
+    this.walletVaultPassword = '';
+    this.walletPrivateKeyPreview = '';
+    this.walletMnemonicPreviews = [];
+    this.walletMnemonicStartIndex = 0;
+  }
+
+  async selectionnerPortefeuille(accountId: string): Promise<void> {
+    if (!this.vaultUnlocked || this.transactionEnCours) return;
+    const account = this.walletAccounts.find((item) => item.id === accountId);
+    if (!account || accountId === this.selectedWalletId) {
+      this.walletManagerOpen = false;
+      return;
+    }
+
+    this.selectedWalletId = account.id;
+    this.adresseWallet = account.address;
+    this.snapshot = null;
+    this.snapshotIsStale = true;
+    this.snapshotWarning = '';
+    this.unlockedWallet = this.walletSigners.get(account.id) ?? null;
+    this.sessionWallet = null;
+    this.sessionAddress = '';
+    this.sessionAutorisee = false;
+    this.soldeDgv = 0;
+    this.soldeDgvDisplay = '—';
+    this.soldeEth = null;
+    this.soldeDgvMessage = '';
+    this.walletDataError = '';
+    this.preparedTransfer = null;
+    this.resetTransactionHistory();
+    this.walletManagerOpen = false;
+    try {
+      localStorage.setItem(SELECTED_WALLET_STORAGE_KEY, account.id);
+      this.walletManagerMessage = '';
+    } catch {
+      this.walletManagerError = 'Le compte a été sélectionné pour cette session, mais son choix n’a pas pu être sauvegardé localement.';
+    }
+
+    await this.chargerWallet();
+    await this.chargerSoldePortefeuilles();
+  }
+
+  async chargerSoldePortefeuilles(): Promise<void> {
+    if (!this.vaultUnlocked) return;
+    const requestId = ++this.walletBalanceRequestId;
+    const provider = this.rpcProvider;
+    if (!provider || !this.rpcConnected) {
+      this.walletAccounts = this.walletAccounts.map((account) => ({
+        ...account,
+        balanceDgv: null,
+        balanceLoading: false
+      }));
+      this.cdr.detectChanges();
+      return;
+    }
+
+    const chain = await provider.getNetwork().catch(() => null);
+    if (
+      requestId !== this.walletBalanceRequestId ||
+      provider !== this.rpcProvider ||
+      !chain ||
+      chain.chainId !== BigInt(this.activeNetwork.chainId)
+    ) {
+      if (requestId === this.walletBalanceRequestId) {
+        this.walletAccounts = this.walletAccounts.map((account) => ({
+          ...account,
+          balanceDgv: null,
+          balanceLoading: false
+        }));
+        this.cdr.detectChanges();
+      }
+      return;
+    }
+
+    this.walletAccounts = this.walletAccounts.map((account) => ({
+      ...account,
+      balanceLoading: true
+    }));
+    this.cdr.detectChanges();
+    const accounts = [...this.walletAccounts];
+    const balances = await Promise.allSettled(
+      accounts.map((account) =>
+        this.networkService.getNativeBalance(provider, account.address)
+      )
+    );
+    if (
+      requestId !== this.walletBalanceRequestId ||
+      provider !== this.rpcProvider
+    ) {
+      return;
+    }
+
+    this.walletAccounts = accounts.map((account, index) => {
+      const result = balances[index];
+      return {
+        ...account,
+        balanceDgv: result?.status === 'fulfilled'
+          ? formatBalanceAmount(result.value)
+          : null,
+        balanceLoading: false
+      };
+    });
+    this.cdr.detectChanges();
+  }
+
+  async copierAdressePortefeuille(account: ManagedWallet): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(account.address);
+      this.walletManagerMessage = `Adresse de « ${account.name} » copiée.`;
+      this.walletManagerError = '';
+    } catch {
+      this.walletManagerError = 'Impossible de copier l’adresse sur cet appareil.';
+    }
+  }
+
+  commencerRenommagePortefeuille(account: ManagedWallet): void {
+    this.editingWalletId = account.id;
+    this.editingWalletName = account.name;
+    this.walletManagerError = '';
+  }
+
+  annulerRenommagePortefeuille(): void {
+    this.editingWalletId = '';
+    this.editingWalletName = '';
+  }
+
+  enregistrerNomPortefeuille(): void {
+    const name = this.editingWalletName.trim();
+    const account = this.walletAccounts.find(
+      (item) => item.id === this.editingWalletId
+    );
+    if (!account) return;
+    if (!name || name.length > 64) {
+      this.walletManagerError = 'Le nom doit contenir entre 1 et 64 caractères.';
+      return;
+    }
+
+    const updated = this.walletAccounts.map((item) =>
+      item.id === account.id ? { ...item, name } : item
+    );
+    if (!this.persistManagedWallets(updated)) return;
+    this.walletAccounts = updated;
+    this.annulerRenommagePortefeuille();
+    this.walletManagerError = '';
+  }
+
+  previsualiserClePrivee(): void {
+    try {
+      this.walletPrivateKeyPreview = new Wallet(
+        this.walletPrivateKeyInput.trim()
+      ).address;
+      this.walletManagerError = '';
+    } catch {
+      this.walletPrivateKeyPreview = '';
+      this.walletManagerError = 'Clé privée invalide. Elle est vérifiée localement et n’est pas enregistrée.';
+    }
+  }
+
+  previsualiserPhrase(startIndex = 0): void {
+    const phrase = this.walletMnemonicInput.trim().replace(/\s+/g, ' ');
+    if (!Number.isSafeInteger(startIndex) || startIndex < 0) {
+      this.walletManagerError = 'Index de dérivation invalide.';
+      return;
+    }
+    try {
+      this.walletMnemonicStartIndex = startIndex;
+      this.walletMnemonicPreviews = Array.from({ length: 5 }, (_, index) => {
+        const accountIndex = startIndex + index;
+        const wallet = HDNodeWallet.fromPhrase(
+          phrase,
+          '',
+          `m/44'/60'/0'/0/${accountIndex}`
+        );
+        return {
+          index: accountIndex,
+          address: wallet.address,
+          selected: accountIndex === startIndex
+        };
+      });
+      this.walletManagerError = '';
+    } catch {
+      this.walletMnemonicPreviews = [];
+      this.walletManagerError = 'Phrase invalide. Elle est vérifiée localement et n’est pas enregistrée.';
+    }
+  }
+
+  async ajouterPortefeuille(): Promise<void> {
+    if (!this.vaultUnlocked || !this.walletAddType) return;
+    this.walletManagerError = '';
+    this.walletManagerMessage = '';
+    const name = this.walletNameInput.trim();
+    if (!name || name.length > 64) {
+      this.walletManagerError = 'Saisissez un nom de 1 à 64 caractères.';
+      return;
+    }
+
+    try {
+      if (this.walletAddType === 'watch') {
+        if (!isAddress(this.walletAddressInput.trim())) {
+          throw new Error('Adresse publique EVM invalide.');
+        }
+        const address = getAddress(this.walletAddressInput.trim());
+        this.ensureWalletAddressIsNew(address);
+        const record: StoredWalletAccount = {
+          id: crypto.randomUUID().replace(/-/g, ''),
+          name,
+          address,
+          kind: 'watch'
+        };
+        await this.enregistrerNouveauxPortefeuilles([{
+          account: record,
+          signer: null
+        }]);
+        return;
+      }
+
+      const password = this.walletVaultPassword;
+      if (password.length < 12) {
+        throw new Error('Saisissez le mot de passe du coffre (12 caractères minimum) pour chiffrer le nouveau compte.');
+      }
+      await this.verifierMotDePasseCoffre(password);
+
+      if (this.walletAddType === 'private-key') {
+        const wallet = new Wallet(this.walletPrivateKeyInput.trim());
+        this.ensureWalletAddressIsNew(wallet.address);
+        const encryptedJson = await wallet.encrypt(password);
+        const record: StoredWalletAccount = {
+          id: crypto.randomUUID().replace(/-/g, ''),
+          name,
+          address: wallet.address,
+          kind: 'private-key',
+          encryptedJson
+        };
+        await this.enregistrerNouveauxPortefeuilles([{
+          account: record,
+          signer: wallet
+        }]);
+        this.walletPrivateKeyInput = '';
+        return;
+      }
+
+      const phrase = this.walletMnemonicInput.trim().replace(/\s+/g, ' ');
+      const selected = this.walletMnemonicPreviews.filter((entry) => entry.selected);
+      if (!selected.length) {
+        throw new Error('Sélectionnez au moins une adresse dérivée de la phrase.');
+      }
+      const newAccounts: Array<{
+        account: StoredWalletAccount;
+        signer: Wallet | HDNodeWallet;
+      }> = [];
+      for (const entry of selected) {
+        const signer = HDNodeWallet.fromPhrase(
+          phrase,
+          '',
+          `m/44'/60'/0'/0/${entry.index}`
+        );
+        if (signer.address.toLowerCase() !== entry.address.toLowerCase()) {
+          throw new Error('Une adresse dérivée a changé; aucun compte n’a été ajouté.');
+        }
+        this.ensureWalletAddressIsNew(signer.address, newAccounts.map(
+          (item) => item.account.address
+        ));
+        newAccounts.push({
+          account: {
+            id: crypto.randomUUID().replace(/-/g, ''),
+            name: selected.length > 1 ? `${name} ${entry.index + 1}` : name,
+            address: signer.address,
+            kind: 'mnemonic',
+            encryptedJson: await signer.encrypt(password)
+          },
+          signer
+        });
+      }
+      await this.enregistrerNouveauxPortefeuilles(newAccounts);
+      this.walletMnemonicInput = '';
+      this.walletMnemonicPreviews = [];
+    } catch (error) {
+      this.walletManagerError = error instanceof Error
+        ? error.message
+        : 'Impossible d’ajouter ce portefeuille; les données existantes sont conservées.';
+    } finally {
+      this.walletVaultPassword = '';
+      this.cdr.detectChanges();
+    }
+  }
+
+  private ensureWalletAddressIsNew(
+    address: string,
+    pendingAddresses: string[] = []
+  ): void {
+    const normalized = address.toLowerCase();
+    if (
+      this.walletAccounts.some((account) =>
+        account.address.toLowerCase() === normalized
+      ) ||
+      pendingAddresses.some((item) => item.toLowerCase() === normalized)
+    ) {
+      throw new Error('Cette adresse est déjà enregistrée dans le gestionnaire.');
+    }
+  }
+
+  private async verifierMotDePasseCoffre(password: string): Promise<void> {
+    const encryptedPrimary = localStorage.getItem(this.vaultKey);
+    if (!encryptedPrimary) {
+      throw new Error('Le coffre principal existant est introuvable; aucun compte n’a été ajouté.');
+    }
+    const primary = await Wallet.fromEncryptedJson(encryptedPrimary, password);
+    const expected = this.walletAccounts.find(
+      (account) => account.id === PRIMARY_WALLET_ID
+    );
+    if (!expected || primary.address.toLowerCase() !== expected.address.toLowerCase()) {
+      throw new Error('Mot de passe incorrect ou coffre principal incohérent.');
+    }
+  }
+
+  private async enregistrerNouveauxPortefeuilles(
+    additions: Array<{
+      account: StoredWalletAccount;
+      signer: Wallet | HDNodeWallet | null;
+    }>
+  ): Promise<void> {
+    const updated = [...this.walletAccounts];
+    for (const addition of additions) {
+      this.ensureWalletAddressIsNew(
+        addition.account.address,
+        updated.map((account) => account.address)
+      );
+      updated.push({
+        ...addition.account,
+        balanceDgv: null,
+        balanceLoading: false
+      });
+    }
+    if (!this.persistManagedWallets(updated)) return;
+
+    this.walletAccounts = updated;
+    for (const addition of additions) {
+      if (addition.signer) {
+        this.walletSigners.set(addition.account.id, addition.signer);
+      }
+    }
+    this.walletManagerMessage = additions.length === 1
+      ? 'Portefeuille ajouté et chiffré localement.'
+      : `${additions.length} comptes dérivés ajoutés et chiffrés localement.`;
+    this.walletManagerError = '';
+    this.fermerAjoutPortefeuille();
+    await this.selectionnerPortefeuille(additions[0].account.id);
+  }
+
+  private persistManagedWallets(accounts: ManagedWallet[]): boolean {
+    const stored: StoredWalletAccount[] = accounts.map((account) => ({
+      id: account.id,
+      name: account.name,
+      address: account.address,
+      kind: account.kind,
+      ...(account.encryptedJson ? { encryptedJson: account.encryptedJson } : {})
+    }));
+    try {
+      const existing = localStorage.getItem(WALLET_ACCOUNTS_STORAGE_KEY);
+      const validatedExisting = existing === null
+        ? []
+        : readStoredWalletAccounts(localStorage);
+      const currentPersisted = this.walletAccounts
+        .filter((account) =>
+          account.id !== PRIMARY_WALLET_ID ||
+          validatedExisting.some((entry) => entry.id === PRIMARY_WALLET_ID)
+        )
+        .map((account) => ({
+          id: account.id,
+          name: account.name,
+          address: account.address,
+          kind: account.kind,
+          ...(account.encryptedJson ? { encryptedJson: account.encryptedJson } : {})
+        }));
+      if (JSON.stringify(validatedExisting) !== JSON.stringify(currentPersisted)) {
+        throw new Error('La liste locale a changé pendant cette opération; rechargez-la avant de continuer.');
+      }
+      writeStoredWalletAccounts(localStorage, stored);
+      return true;
+    } catch (error) {
+      this.walletManagerError = error instanceof Error
+        ? error.message
+        : 'Enregistrement local impossible. Le coffre principal reste inchangé.';
+      return false;
+    }
   }
 
   verrouiller() {
     this.unlockedWallet = null;
+    this.walletSigners.clear();
+    this.walletBalanceRequestId += 1;
+    this.walletAccounts = [];
+    this.selectedWalletId = '';
+    this.vaultUnlocked = false;
+    this.walletManagerOpen = false;
+    this.fermerAjoutPortefeuille();
     this.walletConnecte = false;
     this.adresseWallet = '';
     this.soldeDgv = 0;
@@ -438,6 +1414,12 @@ export class App implements OnInit, OnDestroy {
     this.authConfirm = '';
     this.authPhrase = '';
     this.recoveryPhrase = '';
+    this.walletPrivateKeyInput = '';
+    this.walletMnemonicInput = '';
+    this.walletVaultPassword = '';
+    this.walletPrivateKeyPreview = '';
+    this.walletMnemonicPreviews = [];
+    this.walletMnemonicStartIndex = 0;
     this.fermerTransfert();
     this.choisirAuth('unlock');
   }
@@ -449,6 +1431,9 @@ export class App implements OnInit, OnDestroy {
     );
 
     clearInterval(this.intervalId);
+    if (this.navigationMessageTimeoutId) {
+      clearTimeout(this.navigationMessageTimeoutId);
+    }
     this.arreterTimeoutSignature();
     this.sessionWallet = null;
     this.sessionAddress = '';
@@ -457,6 +1442,12 @@ export class App implements OnInit, OnDestroy {
     this.authConfirm = '';
     this.authPhrase = '';
     this.recoveryPhrase = '';
+    this.walletPrivateKeyInput = '';
+    this.walletMnemonicInput = '';
+    this.walletVaultPassword = '';
+    this.walletPrivateKeyPreview = '';
+    this.walletMnemonicPreviews = [];
+    this.walletMnemonicStartIndex = 0;
     this.rpcProvider?.destroy();
     this.rpcProvider = null;
   }
@@ -618,6 +1609,9 @@ export class App implements OnInit, OnDestroy {
     }
 
     this.adresseWallet = adresse;
+    this.snapshot = null;
+    this.snapshotIsStale = true;
+    this.snapshotWarning = '';
     this.walletConnecte = true;
     this.resetTransactionHistory();
     this.creerSessionDapp();
@@ -692,6 +1686,12 @@ export class App implements OnInit, OnDestroy {
     this.walletConnecte = false;
     this.adresseWallet = '';
     this.unlockedWallet = null;
+    this.walletSigners.clear();
+    this.walletBalanceRequestId += 1;
+    this.walletAccounts = [];
+    this.selectedWalletId = '';
+    this.vaultUnlocked = false;
+    this.walletManagerOpen = false;
     this.sessionWallet = null;
     this.sessionAddress = '';
     this.sessionAutorisee = false;
@@ -742,6 +1742,11 @@ export class App implements OnInit, OnDestroy {
   ouvrirEnvoi() {
     if (!this.walletConnecte) {
       this.ouvrirWallet();
+      return;
+    }
+
+    if (this.activeWalletReadOnly) {
+      this.messageTransaction = 'Ce portefeuille est en lecture seule. Déverrouillez un portefeuille contrôlé pour envoyer des DGV.';
       return;
     }
 
@@ -1183,8 +2188,12 @@ export class App implements OnInit, OnDestroy {
 
     if (!this.rpcProvider || !this.rpcConnected) {
       this.balanceLoading = false;
-      this.soldeDgvDisplay = '—';
-      this.soldeDgvMessage = 'Solde indisponible — réseau déconnecté';
+      if (this.activeNetworkKey === 'digevra-local' && isAddress(this.adresseWallet)) {
+        await this.restaurerSnapshot(this.adresseWallet);
+      } else {
+        this.soldeDgvDisplay = '—';
+        this.soldeDgvMessage = 'Solde indisponible — réseau déconnecté';
+      }
       return;
     }
 
@@ -1246,6 +2255,7 @@ export class App implements OnInit, OnDestroy {
       this.reseauEnLigne = true;
       this.walletDataError = '';
       void this.chargerHistorique(0);
+      void this.synchroniserSnapshot(address, provider);
     } catch {
       if (
         requestId === this.networkSwitchSequence &&
@@ -1262,6 +2272,7 @@ export class App implements OnInit, OnDestroy {
         this.reseauEnLigne = false;
         this.actualChainId = null;
         this.networkError = 'La connexion RPC ou le Chain ID DIGEVRA n’a pas pu être vérifié.';
+        void this.restaurerSnapshot(address);
       }
     } finally {
       if (
@@ -1444,6 +2455,30 @@ export class App implements OnInit, OnDestroy {
     this.vueActive = 'parametres';
   }
 
+  afficherBientotDisponible(fonctionnalite: string): void {
+    this.messageNavigation = `${fonctionnalite} — bientôt disponible.`;
+    if (this.navigationMessageTimeoutId) {
+      clearTimeout(this.navigationMessageTimeoutId);
+    }
+    this.navigationMessageTimeoutId = setTimeout(() => {
+      this.messageNavigation = '';
+      this.navigationMessageTimeoutId = null;
+      this.cdr.detectChanges();
+    }, 3500);
+  }
+
+  afficherNotifications(): void {
+    this.messageNavigation = 'Aucune nouvelle notification.';
+    if (this.navigationMessageTimeoutId) {
+      clearTimeout(this.navigationMessageTimeoutId);
+    }
+    this.navigationMessageTimeoutId = setTimeout(() => {
+      this.messageNavigation = '';
+      this.navigationMessageTimeoutId = null;
+      this.cdr.detectChanges();
+    }, 3500);
+  }
+
   ouvrirWalletView() {
     this.vueActive = 'wallet';
   }
@@ -1524,6 +2559,7 @@ export class App implements OnInit, OnDestroy {
   estEnvoyee(tx: IndexedTransaction): boolean {
     return (
       this.walletConnecte &&
+      !!tx.from &&
       tx.from.toLowerCase() === this.adresseWallet.toLowerCase()
     );
   }

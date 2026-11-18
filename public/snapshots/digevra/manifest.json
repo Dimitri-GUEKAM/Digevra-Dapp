@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "chainId": 20261019,
+  "genesisHash": "0xb6448c0fac400f410a13813a9757faec163bb41d9a75e454466ba2c3116ed04e",
+  "addresses": [
+    "0x35b4336eF00eD099e030D29f925f2C69FD86b912"
+  ]
+}

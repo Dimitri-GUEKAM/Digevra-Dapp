@@ -4,8 +4,8 @@ export interface IndexedTransaction {
   hash: string;
   blockNumber: number;
   transactionIndex: number;
-  from: string;
-  to: string;
+  from: string | null;
+  to: string | null;
   valueWei: string;
   valueDgv: string;
   gasUsed: string;
@@ -33,6 +33,15 @@ export interface IndexedPage<T> {
   };
 }
 
+export interface CompleteAddressHistory {
+  items: IndexedTransaction[];
+  total: number;
+  lastIndexedBlock: number;
+  historyComplete: boolean;
+}
+
+const MAX_SNAPSHOT_TRANSACTIONS = 5000;
+
 export function resolveIndexerApiBaseUrl(
   configuredUrl: string | undefined,
   developmentMode: boolean
@@ -56,11 +65,63 @@ export class IndexerService {
     if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
       throw new Error('Adresse EVM invalide pour la recherche d’historique.');
     }
-
     return this.getJson(
       `${INDEXER_API_BASE_URL}/address/${encodeURIComponent(address)}/transactions` +
         `?limit=${encodeURIComponent(String(limit))}&offset=${encodeURIComponent(String(offset))}`
     );
+  }
+
+  async getCompleteAddressHistory(address: string): Promise<CompleteAddressHistory> {
+    const first = await this.getAddressTransactions(address, 100, 0);
+    if (
+      first.indexer.state !== 'ready' ||
+      !first.indexer.historyComplete ||
+      first.indexer.lastIndexedBlock === null
+    ) {
+      throw new Error('L’indexeur ne dispose pas encore d’un historique complet.');
+    }
+    if (first.pagination.total > MAX_SNAPSHOT_TRANSACTIONS) {
+      throw new Error(
+        `Historique trop volumineux pour le snapshot (${MAX_SNAPSHOT_TRANSACTIONS} transactions maximum).`
+      );
+    }
+
+    const transactions = new Map<string, IndexedTransaction>();
+    const addPage = (items: IndexedTransaction[]) => {
+      for (const transaction of items) {
+        const hash = transaction.hash.toLowerCase();
+        const relatedToAddress =
+          transaction.from?.toLowerCase() === address.toLowerCase() ||
+          transaction.to?.toLowerCase() === address.toLowerCase();
+        if (!relatedToAddress) {
+          throw new Error('L’indexeur a retourné une transaction d’une autre adresse.');
+        }
+        transactions.set(hash, transaction);
+      }
+    };
+
+    addPage(first.items);
+    for (let offset = first.pagination.limit; offset < first.pagination.total; offset += 100) {
+      const page = await this.getAddressTransactions(address, 100, offset);
+      if (
+        page.pagination.total !== first.pagination.total ||
+        page.indexer.lastIndexedBlock !== first.indexer.lastIndexedBlock ||
+        page.indexer.historyComplete !== first.indexer.historyComplete
+      ) {
+        throw new Error('L’indexeur a changé pendant la lecture de l’historique.');
+      }
+      addPage(page.items);
+    }
+
+    return {
+      items: [...transactions.values()].sort((left, right) =>
+        right.blockNumber - left.blockNumber ||
+        right.transactionIndex - left.transactionIndex
+      ),
+      total: first.pagination.total,
+      lastIndexedBlock: first.indexer.lastIndexedBlock,
+      historyComplete: true
+    };
   }
 
   async getStats<T = Record<string, unknown>>(): Promise<T> {
