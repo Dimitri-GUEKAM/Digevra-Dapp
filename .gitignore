@@ -64,6 +64,8 @@ Thumbs.db
 digevra_vault_v1
 digevra_connected_address
 *wallet*
+!src/app/wallet-store.ts
+!src/app/wallet-store.spec.ts
 *vault*
 *recovery*
 *mnemonic*
