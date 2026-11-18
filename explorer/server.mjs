@@ -238,19 +238,21 @@ async function proxyRpc(request, response, rpcUrl, allowBroadcast, rateLimitWind
       chunks.push(chunk);
     }
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    const requests = Array.isArray(payload) ? payload : [payload];
     if (
-      !payload ||
-      typeof payload !== 'object' ||
-      !ALLOWED_RPC_METHODS.has(payload.method) ||
-      !validRpcParams(payload.method, payload.params)
+      requests.length === 0 ||
+      requests.length > 20 ||
+      requests.some((rpcRequest) => !validRpcRequest(rpcRequest))
     ) {
       sendJson(response, 400, { error: 'Unsupported or invalid RPC request.' });
       return;
     }
-    if (payload.method === 'eth_sendRawTransaction' && !allowBroadcast(request)) {
-      response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
-      sendJson(response, 429, { error: 'Transaction broadcast rate limit exceeded.' });
-      return;
+    for (const rpcRequest of requests) {
+      if (rpcRequest.method === 'eth_sendRawTransaction' && !allowBroadcast(request)) {
+        response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
+        sendJson(response, 429, { error: 'Transaction broadcast rate limit exceeded.' });
+        return;
+      }
     }
     const upstream = await fetch(rpcUrl, {
       method: 'POST',
@@ -274,6 +276,20 @@ async function proxyRpc(request, response, rpcUrl, allowBroadcast, rateLimitWind
       });
     }
   }
+}
+
+function validRpcRequest(payload) {
+  return Boolean(
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    payload.jsonrpc === '2.0' &&
+    (payload.id === null ||
+      typeof payload.id === 'string' ||
+      Number.isSafeInteger(payload.id)) &&
+    ALLOWED_RPC_METHODS.has(payload.method) &&
+    validRpcParams(payload.method, payload.params)
+  );
 }
 
 function validRpcParams(method, params) {

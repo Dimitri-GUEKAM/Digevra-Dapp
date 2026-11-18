@@ -23,17 +23,22 @@ test('serves the Explorer and proxies indexer and approved Besu requests', async
   const rpcServer = createServer(async (request, response) => {
     const body = [];
     for await (const chunk of request) body.push(chunk);
-    response.writeHead(200, { 'content-type': 'application/json' });
     const payload = JSON.parse(Buffer.concat(body).toString());
-    response.end(JSON.stringify({
+    const resultFor = (rpcRequest) => ({
       jsonrpc: '2.0',
-      id: payload.id,
-      result: payload.method === 'eth_sendRawTransaction'
+      id: rpcRequest.id,
+      result: rpcRequest.method === 'eth_sendRawTransaction'
         ? `0x${'a'.repeat(64)}`
-        : payload.method === 'eth_estimateGas'
+        : rpcRequest.method === 'eth_estimateGas'
           ? '0x5208'
           : '0x135289b'
-    }));
+    });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(
+      Array.isArray(payload)
+        ? payload.map(resultFor)
+        : resultFor(payload)
+    ));
   });
   const apiUrl = await listen(apiServer);
   const rpcUrl = await listen(rpcServer);
@@ -78,6 +83,36 @@ test('serves the Explorer and proxies indexer and approved Besu requests', async
     'https://dimitri-guekam.github.io'
   );
   assert.equal((await chainId.json()).result, '0x135289b');
+
+  const rpcBatch = await fetch(`${explorerUrl}/rpc`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify([
+      { jsonrpc: '2.0', method: 'eth_chainId', params: [], id: 11 },
+      { jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 12 },
+      {
+        jsonrpc: '2.0',
+        method: 'eth_getCode',
+        params: ['0xf0571df1fb4a56b83ad3962d4167c2cae32f25d1', 'latest'],
+        id: 13
+      }
+    ])
+  });
+  assert.equal(rpcBatch.status, 200);
+  assert.deepEqual(
+    (await rpcBatch.json()).map(({ id }) => id),
+    [11, 12, 13]
+  );
+
+  const invalidRpcBatch = await fetch(`${explorerUrl}/rpc`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify([
+      { jsonrpc: '2.0', method: 'eth_chainId', params: [], id: 14 },
+      { jsonrpc: '2.0', method: 'admin_nodeInfo', params: [], id: 15 }
+    ])
+  });
+  assert.equal(invalidRpcBatch.status, 400);
 
   const genesis = await fetch(`${explorerUrl}/rpc`, {
     method: 'POST',
