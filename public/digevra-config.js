@@ -1,8 +1,8 @@
 globalThis.DIGEVRA_CONFIG = Object.freeze({
-  deploymentMode: 'demo',
+  deploymentMode: 'live',
   chainId: 20261019,
-  rpcUrl: '',
-  indexerApiUrl: '',
+  rpcUrl: 'https://devon-hugh-miami-chester.trycloudflare.com/rpc',
+  indexerApiUrl: 'https://devon-hugh-miami-chester.trycloudflare.com/api',
   dgvUsdIndicativeRate: 0.25,
   publicSnapshotAddresses: [
     '0x35b4336eF00eD099e030D29f925f2C69FD86b912'

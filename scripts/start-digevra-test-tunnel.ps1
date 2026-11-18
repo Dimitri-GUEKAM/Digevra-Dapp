@@ -7,8 +7,13 @@ $expectedChainId = '0x135289b'
 $expectedGenesisHash = '0xb6448c0fac400f410a13813a9757faec163bb41d9a75e454466ba2c3116ed04e'
 
 $cloudflared = Get-Command 'cloudflared' -ErrorAction SilentlyContinue
-if (-not $cloudflared) {
-  throw 'cloudflared is not installed or is not available on PATH.'
+$cloudflaredPath = if ($cloudflared) {
+  $cloudflared.Source
+} else {
+  Join-Path $env:LOCALAPPDATA 'Programs\cloudflared\cloudflared.exe'
+}
+if (-not (Test-Path -LiteralPath $cloudflaredPath -PathType Leaf)) {
+  throw 'cloudflared is not installed or could not be located.'
 }
 
 $chain = Invoke-RestMethod -Uri $rpcUrl -Method Post -ContentType 'application/json' `
@@ -33,7 +38,7 @@ if ($explorer.StatusCode -ne 200) {
   throw 'DIGEVRA Explorer is not responding. Tunnel was not started.'
 }
 
-Write-Output 'Starting a temporary Cloudflare Quick Tunnel to the read-only Explorer proxy.'
+Write-Output 'Starting a temporary Cloudflare Quick Tunnel to the restricted Explorer RPC proxy.'
 Write-Output 'The generated URL is temporary. Do not configure it as a production endpoint.'
 Write-Output 'Besu remains bound to localhost; RPC proxy methods are allowlisted and rate-limited.'
-& $cloudflared.Source tunnel --url $explorerUrl
+& $cloudflaredPath tunnel --url $explorerUrl

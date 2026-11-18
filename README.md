@@ -11,16 +11,21 @@ Explorer at
 URL fragments, so transaction and block detail links survive direct opening and
 browser refresh on GitHub Pages.
 
-The checked-in `public/digevra-config.js` deliberately selects `demo` mode and
-contains no RPC or indexer endpoint. GitHub Pages cannot host the local Besu
-node or Node.js indexer. In demo mode, the interfaces show that live blockchain
-data is unavailable, do not fabricate balances or history, and disable sending.
-To enable live data later, configure accessible public HTTPS RPC and indexer
-endpoints in this public runtime configuration, verify CORS and Chain ID
-`20261019`, and switch `deploymentMode` to `live`. The Pages build rejects
-missing, non-HTTPS, loopback, and private-network endpoints in live mode; demo
-mode must keep both backend URLs empty. Never publish admin RPC endpoints,
-keys, or credentials.
+The checked-in `public/digevra-config.js` currently selects `live` mode through
+a temporary Cloudflare Quick Tunnel to the local, restricted Explorer proxy.
+The proxy serves RPC and read-only indexer requests over HTTPS; the RPC accepts
+only allowlisted methods and limits signed transaction broadcasts to six per
+client per minute. The tunnel URL is temporary, has no uptime guarantee, and
+depends on this PC, Besu, and the indexer remaining online. It is not permanent
+infrastructure. If the tunnel restarts and its URL changes, update both
+`rpcUrl` and `indexerApiUrl` in `public/digevra-config.js`, verify the HTTPS
+endpoints, then rebuild and publish Pages. When the PC is off or the tunnel is
+disconnected, Pages remains available but live balances, indexer history, and
+transaction broadcasts do not.
+
+The Pages build rejects missing, non-HTTPS, loopback, and private-network
+endpoints in live mode; demo mode must keep both backend URLs empty. Never
+publish admin RPC endpoints, keys, or credentials.
 
 The wallet's USD estimate reads `dgvUsdIndicativeRate` from
 `public/digevra-config.js`. It is currently configured to `0.25` (indicative
@@ -62,18 +67,20 @@ recovery phrases in the snapshot. Sender and recipient addresses are public
 blockchain data but remain identifying public activity; review them before
 publishing.
 
-For temporary tests while the PC and local services are running, the optional
-Cloudflare Quick Tunnel preflight is:
+To start a new temporary Cloudflare Quick Tunnel after verifying the local
+services, run:
 
 ```powershell
 .\scripts\start-digevra-test-tunnel.ps1
 ```
 
 It checks Besu, genesis, indexer, and Explorer before forwarding HTTPS traffic to
-the Explorer's rate-limited, read-only RPC proxy. The tunnel URL is temporary,
-changes, and depends on the PC remaining on; it is not a production endpoint or
-a replacement for persistently hosted Besu nodes. Besu is not exposed directly,
-and administrative RPC methods are not allowed.
+the Explorer's rate-limited RPC proxy. The proxy permits only allowlisted reads,
+fee estimation, and broadcasting already-signed transactions; it never receives
+wallet keys, and administrative RPC methods are not allowed. The tunnel URL is
+temporary, changes, and depends on the PC remaining on; it is not a production
+endpoint or a replacement for persistently hosted Besu nodes. Besu is not
+exposed directly.
 
 Build and validate the same artifact used by GitHub Actions:
 

@@ -14,18 +14,28 @@ const MIME_TYPES = new Map([
 ]);
 const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 const BLOCK_TAG_PATTERN = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
-const READ_ONLY_RPC_METHODS = new Set([
+const ALLOWED_RPC_METHODS = new Set([
   'eth_chainId',
   'eth_blockNumber',
   'eth_getBalance',
   'eth_getBlockByNumber',
-  'eth_getCode'
+  'eth_getCode',
+  'eth_getTransactionByHash',
+  'eth_getTransactionReceipt',
+  'eth_getTransactionCount',
+  'eth_gasPrice',
+  'eth_maxPriorityFeePerGas',
+  'eth_estimateGas',
+  'eth_sendRawTransaction'
 ]);
 const DEFAULT_CORS_ORIGINS = [
   'https://dimitri-guekam.github.io',
   'http://localhost:4201',
   'http://127.0.0.1:4201'
 ];
+const RAW_TRANSACTION_PATTERN = /^0x(?:[a-fA-F0-9]{2}){1,8190}$/;
+const TRANSACTION_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/;
+const QUANTITY_PATTERN = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/;
 
 function parseCorsOrigins(value) {
   const origins = (value ?? DEFAULT_CORS_ORIGINS.join(','))
@@ -92,11 +102,13 @@ export function createExplorerServer({
   rpcUrl = 'http://127.0.0.1:9545',
   corsOrigins = process.env.DIGEVRA_CORS_ORIGINS,
   rateLimitMax = 120,
-  rateLimitWindowMs = 60_000
+  rateLimitWindowMs = 60_000,
+  broadcastRateLimitMax = 6
 } = {}) {
   const resolvedRoot = resolve(staticRoot);
   const allowedOrigins = parseCorsOrigins(corsOrigins);
   const allowRequest = createRateLimiter(rateLimitMax, rateLimitWindowMs);
+  const allowBroadcast = createRateLimiter(broadcastRateLimitMax, rateLimitWindowMs);
   return createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
@@ -132,7 +144,7 @@ export function createExplorerServer({
         sendJson(response, 429, { error: 'Request rate limit exceeded.' });
         return;
       }
-      await proxyReadOnlyRpc(request, response, rpcUrl);
+      await proxyRpc(request, response, rpcUrl, allowBroadcast, rateLimitWindowMs);
       return;
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -209,7 +221,7 @@ async function proxyIndexer(request, response, apiBaseUrl) {
   }
 }
 
-async function proxyReadOnlyRpc(request, response, rpcUrl) {
+async function proxyRpc(request, response, rpcUrl, allowBroadcast, rateLimitWindowMs) {
   if (request.method !== 'POST') {
     sendJson(response, 405, { error: 'RPC proxy accepts POST only.' });
     return;
@@ -229,10 +241,15 @@ async function proxyReadOnlyRpc(request, response, rpcUrl) {
     if (
       !payload ||
       typeof payload !== 'object' ||
-      !READ_ONLY_RPC_METHODS.has(payload.method) ||
+      !ALLOWED_RPC_METHODS.has(payload.method) ||
       !validRpcParams(payload.method, payload.params)
     ) {
-      sendJson(response, 400, { error: 'Unsupported or invalid read-only RPC request.' });
+      sendJson(response, 400, { error: 'Unsupported or invalid RPC request.' });
+      return;
+    }
+    if (payload.method === 'eth_sendRawTransaction' && !allowBroadcast(request)) {
+      response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
+      sendJson(response, 429, { error: 'Transaction broadcast rate limit exceeded.' });
       return;
     }
     const upstream = await fetch(rpcUrl, {
@@ -277,11 +294,74 @@ function validRpcParams(method, params) {
       ADDRESS_PATTERN.test(params[0]) &&
       params[1] === 'latest';
   }
-  return method === 'eth_getBlockByNumber' &&
-    params.length === 2 &&
-    (params[0] === 'latest' ||
-      typeof params[0] === 'string' && BLOCK_TAG_PATTERN.test(params[0])) &&
-    params[1] === false;
+  if (method === 'eth_getBlockByNumber') {
+    return params.length === 2 &&
+      (params[0] === 'latest' ||
+        typeof params[0] === 'string' && BLOCK_TAG_PATTERN.test(params[0])) &&
+      params[1] === false;
+  }
+  if (method === 'eth_getTransactionByHash' ||
+      method === 'eth_getTransactionReceipt') {
+    return params.length === 1 &&
+      typeof params[0] === 'string' &&
+      TRANSACTION_HASH_PATTERN.test(params[0]);
+  }
+  if (method === 'eth_getTransactionCount') {
+    return params.length === 2 &&
+      typeof params[0] === 'string' &&
+      ADDRESS_PATTERN.test(params[0]) &&
+      (params[1] === 'latest' ||
+        typeof params[1] === 'string' && BLOCK_TAG_PATTERN.test(params[1]));
+  }
+  if (method === 'eth_gasPrice' || method === 'eth_maxPriorityFeePerGas') {
+    return params.length === 0;
+  }
+  if (method === 'eth_estimateGas') {
+    if (params.length < 1 || params.length > 2 || !params[0] ||
+        typeof params[0] !== 'object' || Array.isArray(params[0])) {
+      return false;
+    }
+    const transaction = params[0];
+    const allowedKeys = new Set([
+      'from', 'to', 'value', 'data', 'input', 'gas', 'gasPrice',
+      'maxFeePerGas', 'maxPriorityFeePerGas', 'nonce', 'type'
+    ]);
+    if (Object.keys(transaction).some((key) => !allowedKeys.has(key))) return false;
+    if (transaction.from !== undefined &&
+        (typeof transaction.from !== 'string' || !ADDRESS_PATTERN.test(transaction.from))) {
+      return false;
+    }
+    if (transaction.to !== undefined &&
+        (typeof transaction.to !== 'string' || !ADDRESS_PATTERN.test(transaction.to))) {
+      return false;
+    }
+    for (const key of [
+      'value', 'gas', 'gasPrice', 'maxFeePerGas', 'maxPriorityFeePerGas',
+      'nonce', 'type'
+    ]) {
+      if (transaction[key] !== undefined &&
+          (typeof transaction[key] !== 'string' || !QUANTITY_PATTERN.test(transaction[key]))) {
+        return false;
+      }
+    }
+    for (const key of ['data', 'input']) {
+      if (transaction[key] !== undefined &&
+          (typeof transaction[key] !== 'string' ||
+            !/^0x(?:[a-fA-F0-9]{2})*$/.test(transaction[key]))) {
+        return false;
+      }
+    }
+    if (params.length === 2 &&
+        params[1] !== 'latest' &&
+        (typeof params[1] !== 'string' || !BLOCK_TAG_PATTERN.test(params[1]))) {
+      return false;
+    }
+    return true;
+  }
+  return method === 'eth_sendRawTransaction' &&
+    params.length === 1 &&
+    typeof params[0] === 'string' &&
+    RAW_TRANSACTION_PATTERN.test(params[0]);
 }
 
 function sendJson(response, status, value) {
