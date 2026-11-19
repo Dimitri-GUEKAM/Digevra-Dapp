@@ -327,6 +327,7 @@ function validRpcParams(method, params) {
       typeof params[0] === 'string' &&
       ADDRESS_PATTERN.test(params[0]) &&
       (params[1] === 'latest' ||
+        params[1] === 'pending' ||
         typeof params[1] === 'string' && BLOCK_TAG_PATTERN.test(params[1]));
   }
   if (method === 'eth_gasPrice' || method === 'eth_maxPriorityFeePerGas') {

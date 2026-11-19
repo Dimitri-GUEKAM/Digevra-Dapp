@@ -20,10 +20,12 @@ test('serves the Explorer and proxies indexer and approved Besu requests', async
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ items: [], path: request.url }));
   });
+  let lastRpcPayload;
   const rpcServer = createServer(async (request, response) => {
     const body = [];
     for await (const chunk of request) body.push(chunk);
     const payload = JSON.parse(Buffer.concat(body).toString());
+    lastRpcPayload = payload;
     const resultFor = (rpcRequest) => ({
       jsonrpc: '2.0',
       id: rpcRequest.id,
@@ -130,6 +132,7 @@ test('serves the Explorer and proxies indexer and approved Besu requests', async
     ['eth_getBalance', ['0x35b4336eF00eD099e030D29f925f2C69FD86b912', '0x7adb']],
     ['eth_getBlockByNumber', ['0x7adb', false]],
     ['eth_getTransactionCount', ['0x35b4336eF00eD099e030D29f925f2C69FD86b912', 'latest']],
+    ['eth_getTransactionCount', ['0x35b4336eF00eD099e030D29f925f2C69FD86b912', 'pending']],
     ['eth_getTransactionReceipt', [`0x${'b'.repeat(64)}`]],
     ['eth_gasPrice', []],
     ['eth_maxPriorityFeePerGas', []],
@@ -146,6 +149,19 @@ test('serves the Explorer and proxies indexer and approved Besu requests', async
     });
     assert.equal(historicalRead.status, 200);
   }
+
+  const pendingNonce = await fetch(`${explorerUrl}/rpc`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'eth_getTransactionCount',
+      params: ['0x35b4336eF00eD099e030D29f925f2C69FD86b912', 'pending'],
+      id: 41
+    })
+  });
+  assert.equal(pendingNonce.status, 200);
+  assert.equal(lastRpcPayload.params[1], 'pending');
 
   const malformedBlockTag = await fetch(`${explorerUrl}/rpc`, {
     method: 'POST',
