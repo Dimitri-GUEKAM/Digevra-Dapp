@@ -116,21 +116,10 @@ interface PreparedNativeTransfer {
   chainId: number;
 }
 
-interface AuthIndexerStatus {
-  state: 'starting' | 'syncing' | 'ready' | 'degraded';
-  chainId: number;
-  rpcConnected: boolean;
-  lastIndexedBlock: number | null;
-  chainHead: number | null;
-  historyComplete: boolean;
-}
-
 interface ManagedWallet extends StoredWalletAccount {
   balanceDgv: string | null;
   balanceLoading: boolean;
 }
-
-type AuthServiceStatus = 'not_checked' | 'checking' | 'connected' | 'unavailable';
 
 @Component({
   selector: 'app-root',
@@ -255,14 +244,6 @@ export class App implements OnInit, OnDestroy {
     return displayRpcEndpoint(globalThis.DIGEVRA_CONFIG?.indexerApiUrl ?? '');
   }
 
-  get authSettingsRpcStatusLabel(): string {
-    return this.authSettingsStatusLabel(this.authSettingsRpcStatus);
-  }
-
-  get authSettingsIndexerStatusLabel(): string {
-    return this.authSettingsStatusLabel(this.authSettingsIndexerStatus);
-  }
-
   get transactionUnavailableReason(): string {
     if (!this.rpcConnected) {
       return 'Les transactions sont désactivées tant que la connexion RPC n’est pas vérifiée.';
@@ -295,16 +276,6 @@ export class App implements OnInit, OnDestroy {
   recoveryPhrase = '';
   authError = '';
   authBusy = false;
-  authSettingsOpen = false;
-  authSettingsRefreshing = false;
-  authSettingsRpcStatus: AuthServiceStatus = 'not_checked';
-  authSettingsRpcChainId: number | null = null;
-  authSettingsRpcBlock: number | null = null;
-  authSettingsRpcError = '';
-  authSettingsIndexerStatus: AuthServiceStatus = 'not_checked';
-  authSettingsIndexerStats: AuthIndexerStatus | null = null;
-  authSettingsIndexerError = '';
-  private authSettingsRequestId = 0;
   vaultUnlocked = false;
   walletManagerOpen = false;
   walletAddOpen = false;
@@ -732,90 +703,6 @@ export class App implements OnInit, OnDestroy {
     this.authPassword = '';
     this.authConfirm = '';
     this.authPhrase = '';
-  }
-
-  async basculerParametresAuth(): Promise<void> {
-    this.authSettingsOpen = !this.authSettingsOpen;
-    if (this.authSettingsOpen) {
-      await this.actualiserParametresAuth();
-    }
-  }
-
-  fermerParametresAuth(): void {
-    this.authSettingsOpen = false;
-  }
-
-  private authSettingsStatusLabel(status: AuthServiceStatus): string {
-    switch (status) {
-      case 'checking':
-        return 'Vérification…';
-      case 'connected':
-        return 'Connecté';
-      case 'unavailable':
-        return 'Indisponible';
-      case 'not_checked':
-        return 'Non vérifié';
-    }
-  }
-
-  async actualiserParametresAuth(): Promise<void> {
-    const requestId = ++this.authSettingsRequestId;
-    this.authSettingsRefreshing = true;
-    this.authSettingsRpcStatus = 'checking';
-    this.authSettingsRpcChainId = null;
-    this.authSettingsRpcBlock = null;
-    this.authSettingsRpcError = '';
-    this.authSettingsIndexerStatus = 'checking';
-    this.authSettingsIndexerStats = null;
-    this.authSettingsIndexerError = '';
-
-    const [rpcResult, indexerResult] = await Promise.allSettled([
-      this.networkService.connect(this.activeNetwork),
-      this.indexerService.getStats<AuthIndexerStatus>()
-    ]);
-
-    if (rpcResult.status === 'fulfilled') {
-      this.networkService.destroy(rpcResult.value.provider);
-    }
-    if (requestId !== this.authSettingsRequestId) {
-      return;
-    }
-
-    if (rpcResult.status === 'fulfilled') {
-      this.authSettingsRpcChainId = rpcResult.value.chainId;
-      this.authSettingsRpcBlock = rpcResult.value.blockNumber;
-      this.authSettingsRpcStatus = 'connected';
-    } else {
-      this.authSettingsRpcStatus = 'unavailable';
-      this.authSettingsRpcError = rpcResult.reason instanceof Error
-        ? rpcResult.reason.message
-        : 'État RPC indisponible.';
-    }
-
-    if (indexerResult.status === 'fulfilled') {
-      const stats = indexerResult.value;
-      this.authSettingsIndexerStats = stats;
-      if (stats.chainId !== this.activeNetwork.chainId) {
-        this.authSettingsIndexerStatus = 'unavailable';
-        this.authSettingsIndexerError =
-          `Chain ID inattendu : reçu ${stats.chainId}, attendu ${this.activeNetwork.chainId}.`;
-      } else if (!stats.rpcConnected || stats.state === 'degraded') {
-        this.authSettingsIndexerStatus = 'unavailable';
-        this.authSettingsIndexerError =
-          'L’indexeur ne confirme pas sa connexion au RPC.';
-      } else {
-        this.authSettingsIndexerStatus = 'connected';
-      }
-    } else {
-      this.authSettingsIndexerStatus = 'unavailable';
-      this.authSettingsIndexerError = indexerResult.reason instanceof Error
-        ? indexerResult.reason.message
-        : 'État de l’indexeur indisponible.';
-    }
-
-    this.authSettingsRefreshing = false;
-    this.cdr.detectChanges();
-    this.recoveryAcknowledged = false;
   }
 
   async creerPortefeuille() {

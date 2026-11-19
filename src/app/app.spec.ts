@@ -229,7 +229,7 @@ describe('App', () => {
     fixture.destroy();
   });
 
-  it('renders the DIGEVRA auth screen with all welcome options', async () => {
+  it('renders the DIGEVRA auth screen without a settings button', async () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     await fixture.whenStable();
@@ -249,22 +249,8 @@ describe('App', () => {
     expect(compiled.querySelector('.auth-login-link')?.textContent)
       .toContain('Se connecter');
     expect(compiled.querySelector('.auth-back')).toBeNull();
-    const settingsButton = compiled.querySelector(
-      '.auth-settings-button'
-    ) as HTMLButtonElement | null;
-    expect(settingsButton?.textContent).toContain('Paramètres');
-    settingsButton?.click();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    expect(compiled.querySelector('#auth-settings-panel')?.hasAttribute('hidden'))
-      .toBe(false);
-    expect(compiled.querySelector('.auth-settings-rpc-status')?.textContent)
-      .toContain('Indisponible');
-    expect(compiled.querySelector('.auth-settings-indexer-status')?.textContent)
-      .toContain('Connecté');
-    expect(compiled.querySelectorAll(
-      '#auth-settings-panel input, #auth-settings-panel textarea'
-    )).toHaveLength(0);
+    expect(compiled.querySelector('.auth-settings-button')).toBeNull();
+    expect(compiled.querySelector('#auth-settings-panel')).toBeNull();
     fixture.destroy();
   });
 
