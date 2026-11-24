@@ -1,4 +1,4 @@
-<section class="auth-shell" *ngIf="!walletConnecte">
+<section class="auth-shell" *ngIf="!walletConnecte && !consultationMode">
   <div class="auth-card">
     <img class="auth-logo" src="digevra-logo.png" alt="Logo DIGEVRA" width="230" height="153" />
     <p class="auth-eyebrow">VOTRE WALLET DIGEVRA</p>
@@ -55,7 +55,7 @@
   </div>
 </section>
 
-<div *ngIf="walletConnecte">
+<div *ngIf="walletConnecte || consultationMode">
 <div class="app">
 
   <!-- Header DIGEVRA -->
@@ -271,6 +271,11 @@
           <button type="button" class="v3-balance-refresh" (click)="actualiserSolde()" [disabled]="networkSwitchInProgress || balanceLoading" aria-label="Actualiser le solde">Actualiser le solde <span aria-hidden="true">↻</span></button>
           <p class="v3-network-warning" role="status" *ngIf="modeDemonstration">Mode démonstration : aucun RPC ni indexeur HTTPS n’est configuré. Seul un snapshot vérifié peut rester consultable, avec son état non actualisé; les envois sont désactivés.</p>
         </section>
+        <app-multichain-assets
+          [accounts]="multichainAccounts"
+          [selectedWalletId]="selectedWalletId"
+          (walletSelected)="selectionnerPortefeuilleDepuisMultiChain($event)">
+        </app-multichain-assets>
         <div class="v3-actions" aria-label="Actions du portefeuille">
           <button type="button" class="v3-action" [disabled]="modeDemonstration || !rpcConnected || activeWalletReadOnly" (click)="ouvrirEnvoi()"><span class="v3-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></span><strong>Envoyer</strong><small>{{ activeWalletReadOnly ? 'Lecture seule' : 'Transférer des DGV' }}</small></button>
           <button type="button" class="v3-action" (click)="ouvrirReception()"><span class="v3-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14m6-6-6 6-6-6"/></svg></span><strong>Recevoir</strong><small>Obtenir des DGV</small></button>
@@ -285,6 +290,13 @@
           <p class="v3-snapshot-stale" role="status" *ngIf="snapshotVisible && !rpcConnected">
             Historique DIGEVRA non actualisé · Dernière synchronisation
             {{ snapshot?.syncedAt | date:'medium' }} · Bloc {{ snapshot?.lastBlockNumber }}
+          </p>
+          <p class="v3-snapshot-stale" role="status" *ngIf="transactionsStale && transactionsSyncedAt && rpcConnected">
+            Historique non actualisé · Dernier snapshot vérifié
+            {{ transactionsSyncedAt | date:'medium' }} · Bloc {{ transactionsIndexedThrough }}
+          </p>
+          <p class="v3-snapshot-stale" role="status" *ngIf="transactionsStale && !transactionsSyncedAt && rpcConnected">
+            L’indexeur ne suit pas encore la tête RPC · Dernier bloc indexé {{ transactionsIndexedThrough ?? '—' }}.
           </p>
           <p class="v3-empty" *ngIf="transactionsLoading">Chargement de l’historique indexé…</p>
           <p class="v3-empty" *ngIf="transactionsError">Historique indisponible : {{ transactionsError }}</p>
@@ -364,6 +376,14 @@
       <p class="v3-snapshot-stale" role="status" *ngIf="snapshotVisible && !rpcConnected">
         Données DIGEVRA non actualisées · Dernière synchronisation
         {{ snapshot?.syncedAt | date:'medium' }} · Bloc {{ snapshot?.lastBlockNumber }}
+      </p>
+      <p class="v3-snapshot-stale" role="status" *ngIf="transactionsStale && transactionsSyncedAt && rpcConnected">
+        Historique du snapshot non actualisé · Dernière synchronisation vérifiée
+        {{ transactionsSyncedAt | date:'medium' }} · Bloc {{ transactionsIndexedThrough }}
+      </p>
+      <p class="v3-snapshot-stale" role="status" *ngIf="transactionsStale && !transactionsSyncedAt && rpcConnected">
+        L’indexeur ne suit pas encore la tête RPC · Dernier bloc indexé
+        {{ transactionsIndexedThrough ?? '—' }}.
       </p>
       <div *ngIf="transactionsLoading" class="empty-state" aria-live="polite">
         Chargement des transactions indexées…
@@ -468,6 +488,9 @@
       <p
         *ngIf="messageTransaction"
         class="transaction-message"
+        [class.transaction-success]="transactionStatus === 'confirmed'"
+        [class.transaction-pending]="transactionStatus === 'pending'"
+        [class.transaction-failed]="transactionStatus === 'failed'"
         aria-live="polite"
       >
         {{ messageTransaction }}
@@ -557,6 +580,9 @@
       <p
         *ngIf="messageTransaction"
         class="transaction-message"
+        [class.transaction-success]="transactionStatus === 'confirmed'"
+        [class.transaction-pending]="transactionStatus === 'pending'"
+        [class.transaction-failed]="transactionStatus === 'failed'"
         aria-live="polite"
       >
         {{ messageTransaction }}
@@ -565,10 +591,10 @@
       <button
         type="button"
         class="confirm-transfer"
-        [disabled]="transactionEnCours || !rpcConnected"
+        [disabled]="transactionEnCours || !rpcConnected || transactionStatus === 'pending'"
         (click)="preparerEnvoi()"
       >
-        {{ transactionEnCours ? 'Vérification en cours...' : 'Vérifier le transfert' }}
+        {{ transactionStatus === 'pending' ? 'Transaction en attente de confirmation' : (transactionEnCours ? 'Vérification en cours...' : 'Vérifier le transfert') }}
       </button>
 
       <section
@@ -586,10 +612,10 @@
         <button
           type="button"
           class="confirm-transfer"
-          [disabled]="transactionEnCours"
+          [disabled]="transactionEnCours || transactionStatus === 'pending'"
           (click)="confirmerEtEnvoyer()"
         >
-          {{ transactionEnCours ? 'Confirmation en cours...' : 'Confirmer et envoyer' }}
+          {{ transactionStatus === 'pending' ? 'Transaction en attente de confirmation' : (transactionEnCours ? 'Signature / diffusion en cours...' : 'Confirmer et envoyer') }}
         </button>
       </section>
 
@@ -599,7 +625,7 @@
         class="tx-hash-link"
         (click)="ouvrirTransaction(dernierHashTransaction)"
       >
-        Voir la transaction dans DIGEVRA Explorer
+        {{ transactionStatus === 'confirmed' ? 'Consulter la transaction confirmée dans DIGEVRA Explorer' : 'Suivre la transaction dans DIGEVRA Explorer' }}
       </button>
     </section>
   </div>

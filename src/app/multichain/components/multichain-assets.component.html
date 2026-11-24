@@ -1,0 +1,176 @@
+<section class="multichain-panel" aria-labelledby="multichain-title">
+  <header class="multichain-heading">
+    <div>
+      <p class="multichain-eyebrow">VOTRE PORTEFEUILLE</p>
+      <h2 id="multichain-title">Actifs multichaînes</h2>
+      <p class="multichain-description">Consultation en lecture seule sur les réseaux principaux.</p>
+    </div>
+    <button
+      type="button"
+      class="multichain-refresh"
+      (click)="refreshBalances()"
+      [disabled]="refreshing"
+      aria-label="Actualiser les soldes multichaînes">
+      {{ refreshing ? 'Actualisation…' : 'Actualiser ↻' }}
+    </button>
+  </header>
+
+  <div class="multichain-assets" aria-label="Actifs par réseau">
+    <button
+      *ngFor="let network of networks"
+      type="button"
+      class="multichain-asset"
+      [class.selected]="selectedNetworkId === network.id"
+      [attr.aria-pressed]="selectedNetworkId === network.id"
+      (click)="selectNetwork(network.id)">
+      <span
+        class="multichain-asset-logo"
+        [style.--asset-color]="network.nativeAsset.logoColor"
+        [class.digevra-logo]="network.id === 'digevra'">
+        <img
+          *ngIf="network.nativeAsset.logoUrl"
+          [src]="network.nativeAsset.logoUrl"
+          alt=""
+          width="42"
+          height="42" />
+        <span *ngIf="!network.nativeAsset.logoUrl" aria-hidden="true">{{ network.nativeAsset.logoText }}</span>
+      </span>
+      <span class="multichain-asset-main">
+        <strong>{{ network.nativeAsset.name }}</strong>
+        <small>{{ network.name }} · {{ network.nativeAsset.symbol }}</small>
+        <small *ngIf="accountForNetwork(network.id) as account">
+          {{ account.address | slice:0:12 }}… · {{ account.walletName }}
+        </small>
+        <small class="multichain-status" [attr.data-state]="balanceFor(network.id).state">
+          <ng-container [ngSwitch]="balanceFor(network.id).state">
+            <span *ngSwitchCase="'loading'">Lecture du réseau…</span>
+            <span *ngSwitchCase="'connected'">Données vérifiées · {{ balanceFor(network.id).updatedAt | date:'shortTime' }}</span>
+            <span *ngSwitchCase="'error'">Erreur de lecture</span>
+            <span *ngSwitchDefault>{{ balanceFor(network.id).error || 'Données indisponibles' }}</span>
+          </ng-container>
+        </small>
+      </span>
+      <span class="multichain-asset-balance">
+        <strong *ngIf="balanceFor(network.id).state === 'connected'; else unavailableBalance">
+          {{ balanceFor(network.id).amount }} {{ network.nativeAsset.symbol }}
+        </strong>
+        <ng-template #unavailableBalance>
+          <strong *ngIf="balanceFor(network.id).state === 'loading'; else noBalance">Chargement…</strong>
+          <ng-template #noBalance><strong>—</strong></ng-template>
+        </ng-template>
+        <small>{{ balanceFor(network.id).estimatedValue || 'Valeur estimée indisponible' }}</small>
+      </span>
+      <a
+        *ngIf="explorerLink(network) as link"
+        class="multichain-explorer-link"
+        [href]="link"
+        target="_blank"
+        rel="noopener noreferrer"
+        (click)="$event.stopPropagation()"
+        [attr.aria-label]="'Ouvrir ' + network.name + ' Explorer'">↗</a>
+    </button>
+  </div>
+
+  <div class="multichain-selected" *ngIf="selectedNetwork as selected">
+    <div>
+      <strong>{{ selected.networkName }}</strong>
+      <span *ngIf="balanceFor(selected.id).state === 'connected'">
+        Solde confirmé : {{ balanceFor(selected.id).amount }} {{ selected.nativeAsset.symbol }}
+      </span>
+      <span *ngIf="balanceFor(selected.id).state === 'error'" class="multichain-error">
+        Solde non disponible : {{ balanceFor(selected.id).error }}
+      </span>
+      <span *ngIf="balanceFor(selected.id).state === 'unavailable'">
+        {{ balanceFor(selected.id).error }}
+      </span>
+      <label *ngIf="accountsForNetwork(selected.id).length > 1">
+        Compte
+        <select
+          [ngModel]="accountForNetwork(selected.id)?.id"
+          (ngModelChange)="selectAccount(selected.id, $event)"
+          [attr.aria-label]="'Compte pour ' + selected.name">
+          <option *ngFor="let account of accountsForNetwork(selected.id)" [value]="account.id">
+            {{ account.walletName }} · {{ account.address | slice:0:12 }}…
+          </option>
+        </select>
+      </label>
+      <code *ngIf="selectedAccount as account">{{ account.address }}</code>
+      <span *ngIf="selectedAccount as account" class="multichain-signing-state">
+        <ng-container *ngIf="account.source === 'watch'; else managedAccount">
+          Consultation seule · aucune clé de signature
+        </ng-container>
+        <ng-template #managedAccount>
+          <ng-container *ngIf="account.canSign; else sendNotIntegrated">
+            Clé locale disponible · envoi DIGEVRA existant
+          </ng-container>
+        </ng-template>
+        <ng-template #sendNotIntegrated>
+          Clé dérivée/chiffrée disponible · envoi non intégré sur ce réseau
+        </ng-template>
+      </span>
+      <div class="multichain-address-actions" *ngIf="selectedAccount">
+        <button type="button" (click)="copySelectedAddress()">Copier l’adresse</button>
+        <button type="button" (click)="generateSelectedQr()">Afficher QR</button>
+      </div>
+      <p class="multichain-saved" role="status" *ngIf="copyMessage">{{ copyMessage }}</p>
+      <p class="multichain-error" role="alert" *ngIf="qrError">{{ qrError }}</p>
+      <img
+        *ngIf="qrCodeDataUrl"
+        class="multichain-qr"
+        [src]="qrCodeDataUrl"
+        alt="QR code de l’adresse de réception sélectionnée" />
+    </div>
+    <a
+      *ngIf="explorerLink(selected) as link"
+      [href]="link"
+      target="_blank"
+      rel="noopener noreferrer">Explorer {{ selected.name }} ↗</a>
+  </div>
+
+  <details class="multichain-watch-addresses">
+    <summary>Ajouter un compte public Bitcoin ou Solana</summary>
+    <p>Compte en consultation seule : l’adresse est stockée localement, sans clé ni phrase de récupération.</p>
+    <label>
+      Réseau
+      <select
+        [ngModel]="selectedNetworkId"
+        (ngModelChange)="selectNetwork($event)"
+        aria-label="Réseau du compte public">
+        <option value="bitcoin">Bitcoin Mainnet</option>
+        <option value="solana">Solana Mainnet-beta</option>
+        <option value="ethereum" disabled>Ethereum — gérer dans Mes portefeuilles</option>
+        <option value="bnb-smart-chain" disabled>BNB — gérer dans Mes portefeuilles</option>
+        <option value="digevra" disabled>DIGEVRA — gérer dans Mes portefeuilles</option>
+      </select>
+    </label>
+    <label>
+      Nom du compte (facultatif)
+      <input
+        type="text"
+        autocomplete="off"
+        maxlength="64"
+        [(ngModel)]="watchAccountName"
+        placeholder="Mon compte de consultation" />
+    </label>
+    <label>
+      Adresse publique
+      <input
+        type="text"
+        inputmode="text"
+        autocomplete="off"
+        spellcheck="false"
+        [maxlength]="selectedNetworkId === 'bitcoin' ? 90 : 44"
+        [(ngModel)]="watchAddressInput"
+        [placeholder]="selectedNetworkId === 'bitcoin' ? 'Adresse commençant par 1, 3 ou bc1' : 'Adresse publique Solana'" />
+    </label>
+    <button type="button" class="multichain-save" (click)="saveWatchAccount()">Ajouter le compte en lecture seule</button>
+    <p class="multichain-error" role="alert" *ngIf="addressError">{{ addressError }}</p>
+    <p class="multichain-saved" role="status" *ngIf="addressMessage">{{ addressMessage }}</p>
+  </details>
+
+  <p class="multichain-footnote">
+    Une phrase BIP39 permet une dérivation BIP84 pour Bitcoin, BIP44 pour Ethereum/BNB/DIGEVRA et SLIP-0010 pour Solana.
+    Les clés restent dans le coffre chiffré existant. Une clé EVM seule ne produit pas d’adresse Bitcoin ou Solana.
+    Seuls les transferts DIGEVRA existants sont activés; les autres réseaux sont en lecture seule ici.
+  </p>
+</section>

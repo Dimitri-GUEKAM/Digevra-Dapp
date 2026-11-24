@@ -1,0 +1,365 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+
+.multichain-panel {
+  min-width: 0;
+  padding: clamp(17px, 3vw, 25px);
+  border: 1px solid rgba(175, 117, 224, .2);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(132, 72, 179, .13), transparent 38%),
+    linear-gradient(145deg, #171122, #100d18 72%);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, .18);
+  color: #f7f3ff;
+}
+
+.multichain-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 17px;
+}
+
+.multichain-eyebrow {
+  margin: 0 0 5px;
+  color: #c294eb;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+.multichain-heading h2 {
+  margin: 0;
+  font-size: clamp(18px, 4vw, 22px);
+  letter-spacing: -.03em;
+}
+
+.multichain-description {
+  margin: 6px 0 0;
+  color: #a99bb8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.multichain-refresh,
+.multichain-save {
+  min-height: 42px;
+  padding: 0 13px;
+  border: 1px solid rgba(190, 143, 235, .35);
+  border-radius: 12px;
+  background: rgba(54, 35, 75, .82);
+  color: #f3eaff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.multichain-refresh:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.multichain-assets {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+}
+
+.multichain-asset {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 76px;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(120px, auto) 34px;
+  align-items: center;
+  gap: 11px;
+  padding: 11px;
+  border: 1px solid rgba(187, 142, 237, .12);
+  border-radius: 16px;
+  background: rgba(9, 7, 17, .45);
+  color: inherit;
+  text-align: left;
+  transition: border-color .16s ease, background .16s ease;
+}
+
+.multichain-asset:hover,
+.multichain-asset.selected {
+  border-color: rgba(190, 143, 235, .52);
+  background: rgba(74, 44, 99, .27);
+}
+
+.multichain-asset-logo {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--asset-color) 20%, #16111f);
+  color: var(--asset-color);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.multichain-asset-logo img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.multichain-asset-logo.digevra-logo {
+  border: 1px solid rgba(205, 157, 248, .35);
+  background: linear-gradient(145deg, #37204c, #191022);
+}
+
+.multichain-asset-main,
+.multichain-asset-balance {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.multichain-asset-main strong,
+.multichain-asset-balance strong {
+  overflow: hidden;
+  color: #f4edff;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multichain-asset-main small,
+.multichain-asset-balance small {
+  overflow: hidden;
+  color: #a99bb8;
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.multichain-asset-main .multichain-status[data-state="error"] {
+  color: #ff9aab;
+}
+
+.multichain-asset-main .multichain-status[data-state="connected"] {
+  color: #8bdab6;
+}
+
+.multichain-asset-balance {
+  justify-items: end;
+  text-align: right;
+}
+
+.multichain-explorer-link {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(192, 147, 235, .1);
+  color: #d7b6f4;
+  font-size: 18px;
+  text-decoration: none;
+}
+
+.multichain-selected {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 15px;
+  padding: 13px;
+  border: 1px solid rgba(187, 142, 237, .13);
+  border-radius: 14px;
+  background: rgba(9, 7, 17, .38);
+}
+
+.multichain-selected > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.multichain-selected strong {
+  font-size: 12px;
+}
+
+.multichain-selected span,
+.multichain-selected a {
+  color: #b7a7c8;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.multichain-selected code {
+  overflow-wrap: anywhere;
+  color: #d7c1ed;
+  font-size: 10px;
+}
+
+.multichain-selected label {
+  display: grid;
+  gap: 5px;
+  color: #cdb9df;
+  font-size: 10px;
+}
+
+.multichain-selected select,
+.multichain-watch-addresses select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid rgba(190, 143, 235, .25);
+  border-radius: 10px;
+  background: #100d18;
+  color: #f7f3ff;
+  font-size: 11px;
+}
+
+.multichain-signing-state {
+  color: #c5b3d5 !important;
+}
+
+.multichain-address-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.multichain-address-actions button {
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid rgba(190, 143, 235, .27);
+  border-radius: 10px;
+  background: rgba(54, 35, 75, .65);
+  color: #ead9fc;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.multichain-qr {
+  width: 220px;
+  max-width: 100%;
+  height: auto;
+  padding: 8px;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.multichain-selected a {
+  flex: 0 0 auto;
+  color: #d2a4ff;
+  text-decoration: none;
+}
+
+.multichain-watch-addresses {
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid rgba(187, 142, 237, .13);
+  border-radius: 14px;
+  background: rgba(9, 7, 17, .3);
+}
+
+.multichain-watch-addresses summary {
+  min-height: 30px;
+  color: #e7d8f6;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.multichain-watch-addresses > p {
+  color: #a99bb8;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.multichain-watch-addresses label {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  color: #d1c0df;
+  font-size: 11px;
+}
+
+.multichain-watch-addresses input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid rgba(190, 143, 235, .22);
+  border-radius: 11px;
+  outline: none;
+  background: #100d18;
+  color: #f7f3ff;
+  font-size: 12px;
+}
+
+.multichain-watch-addresses select {
+  min-height: 44px;
+}
+
+.multichain-watch-addresses input:focus {
+  border-color: #b87be8;
+  box-shadow: 0 0 0 3px rgba(174, 105, 224, .14);
+}
+
+.multichain-save {
+  margin-top: 12px;
+}
+
+.multichain-error {
+  color: #ff9aab !important;
+}
+
+.multichain-saved {
+  color: #8bdab6 !important;
+}
+
+.multichain-footnote {
+  margin: 14px 0 0;
+  color: #94869f;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+@media (min-width: 640px) {
+  .multichain-assets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .multichain-heading {
+    align-items: center;
+  }
+
+  .multichain-refresh {
+    flex: 0 0 auto;
+    padding: 0 10px;
+    font-size: 10px;
+  }
+
+  .multichain-asset {
+    grid-template-columns: 39px minmax(0, 1fr) minmax(84px, auto);
+    gap: 8px;
+    padding: 9px;
+  }
+
+  .multichain-asset-logo {
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
+  }
+
+  .multichain-explorer-link {
+    display: none;
+  }
+
+  .multichain-asset-main strong,
+  .multichain-asset-balance strong {
+    font-size: 11px;
+  }
+}

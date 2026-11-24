@@ -9,8 +9,8 @@ const PAGE_SIZE = 10;
 const runtimeConfig = globalThis.DIGEVRA_CONFIG ?? {};
 const localDevelopment = location.port === '4201';
 const configuredIndexerUrl = runtimeConfig.indexerApiUrl?.trim().replace(/\/+$/, '');
-const indexerBaseUrl = configuredIndexerUrl || (localDevelopment ? '/api' : '');
-const rpcEndpoint = runtimeConfig.rpcUrl?.trim() || (localDevelopment ? '/rpc' : '');
+const indexerBaseUrl = localDevelopment ? '/api' : configuredIndexerUrl || '';
+const rpcEndpoint = localDevelopment ? '/rpc' : runtimeConfig.rpcUrl?.trim() || '';
 
 if (walletLink) {
   const configuredWalletUrl = runtimeConfig.walletUrl?.trim();

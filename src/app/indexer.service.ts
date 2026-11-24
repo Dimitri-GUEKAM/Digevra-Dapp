@@ -46,8 +46,9 @@ export function resolveIndexerApiBaseUrl(
   configuredUrl: string | undefined,
   developmentMode: boolean
 ): string {
+  if (developmentMode) return '/api';
   const configured = configuredUrl?.trim().replace(/\/+$/, '');
-  return configured || (developmentMode ? '/api' : '');
+  return configured ?? '';
 }
 
 const INDEXER_API_BASE_URL = resolveIndexerApiBaseUrl(

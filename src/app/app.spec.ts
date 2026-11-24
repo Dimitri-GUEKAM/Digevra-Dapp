@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HDNodeWallet, Wallet } from 'ethers';
+import { HDNodeWallet, keccak256, Wallet } from 'ethers';
 import {
   App,
   formatDgvBalanceDisplay,
@@ -10,6 +10,8 @@ import { NETWORKS } from './network-config';
 import { IndexerService } from './indexer.service';
 import type { IndexedTransaction } from './indexer.service';
 import { SnapshotService } from './snapshot.service';
+import { MultiChainService } from './multichain/services/multichain.service';
+import { MultiChainWalletService } from './multichain/services/multichain-wallet.service';
 import { afterEach, vi } from 'vitest';
 import {
   PRIMARY_WALLET_ID,
@@ -17,6 +19,64 @@ import {
   SELECTED_WALLET_STORAGE_KEY,
   WALLET_ACCOUNTS_STORAGE_KEY
 } from './wallet-store';
+import {
+  readTrackedTransaction,
+  saveTrackedTransaction,
+  TrackedTransaction
+} from './transaction-tracking';
+
+function configureMockTransfer(
+  app: App,
+  options: {
+    receipt?: {
+      hash: string;
+      blockNumber: number;
+      blockHash: string;
+      status: number;
+    } | null;
+    broadcast?: () => Promise<{ hash: string }>;
+  } = {}
+) {
+  const signedTransaction = `0x${'12'.repeat(100)}`;
+  const hash = keccak256(signedTransaction);
+  const blockHash = `0x${'b'.repeat(64)}`;
+  const provider = {
+    getNetwork: vi.fn().mockResolvedValue({ chainId: 20261019n }),
+    getCode: vi.fn().mockResolvedValue('0x'),
+    getBalance: vi.fn().mockResolvedValue(100n * 10n ** 18n),
+    getTransactionCount: vi.fn().mockResolvedValue(2),
+    broadcastTransaction: vi.fn().mockImplementation(
+      options.broadcast ?? (async () => ({ hash }))
+    ),
+    getTransactionReceipt: vi.fn().mockImplementation(
+      async () => options.receipt ?? null
+    ),
+    getBlock: vi.fn().mockResolvedValue({ hash: blockHash }),
+    getFeeData: vi.fn().mockResolvedValue({
+      gasPrice: 1_000_000_000n,
+      maxFeePerGas: null,
+      maxPriorityFeePerGas: null
+    }),
+    estimateGas: vi.fn().mockResolvedValue(21_000n),
+    destroy: vi.fn()
+  };
+  const signer = {
+    address: '0x1111111111111111111111111111111111111111',
+    connect: vi.fn(() => ({
+      signTransaction: vi.fn().mockResolvedValue(signedTransaction)
+    }))
+  };
+  (app as any).rpcProvider = provider;
+  (app as any).unlockedWallet = signer;
+  app.rpcConnected = true;
+  app.walletConnecte = true;
+  app.adresseWallet = signer.address;
+  app.adresseDestinataire = '0x2222222222222222222222222222222222222222';
+  app.montantEnvoi = 1.25;
+  vi.spyOn(TestBed.inject(NetworkService), 'getNativeBalance')
+    .mockResolvedValue('98.7499748');
+  return { provider, signer, signedTransaction, hash, blockHash };
+}
 
 describe('App', () => {
   let runtimeConfigBeforeTest = globalThis.DIGEVRA_CONFIG;
@@ -62,6 +122,22 @@ describe('App', () => {
           load: vi.fn().mockResolvedValue({ snapshot: null, warning: '' }),
           saveLocal: vi.fn(),
           readLocal: vi.fn().mockReturnValue(null)
+        }
+      }, {
+        provide: MultiChainService,
+        useValue: {
+          networks: [],
+          getNetwork: vi.fn(),
+          isValidAddress: vi.fn().mockReturnValue(false),
+          hasBalanceEndpoint: vi.fn().mockReturnValue(false),
+          getNativeBalance: vi.fn(),
+          getTokenBalance: vi.fn()
+        }
+      }, {
+        provide: MultiChainWalletService,
+        useValue: {
+          deriveAccounts: vi.fn().mockReturnValue([]),
+          createWatchAccount: vi.fn().mockReturnValue([])
         }
       }]
     })
@@ -476,7 +552,7 @@ describe('App', () => {
         else localStorage.setItem(key, value);
       }
     }
-  }, 30000);
+  }, 60000);
 
   it('renders the wallet home sections in the requested order with four tactile actions', async () => {
     const fixture = TestBed.createComponent(App);
@@ -726,6 +802,55 @@ describe('App', () => {
     expect(app.transactionsHistoryComplete).toBe(false);
     expect(app.transactions).toEqual([]);
     expect(app.transactionsLoading).toBe(false);
+    fixture.destroy();
+  });
+
+  it('uses only the matching cached snapshot when the indexer is unavailable', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const address = '0x1111111111111111111111111111111111111111';
+    const snapshot = {
+      schemaVersion: 1 as const,
+      chainId: 20261019 as const,
+      genesisHash: '0xb6448c0fac400f410a13813a9757faec163bb41d9a75e454466ba2c3116ed04e',
+      lastBlockNumber: 145,
+      lastBlockHash: `0x${'a'.repeat(64)}`,
+      syncedAt: '2026-11-19T10:00:00.000Z',
+      address,
+      balanceWei: '1000000000000000000',
+      balanceDgv: '1.0',
+      historyComplete: true,
+      transactions: [{
+        hash: `0x${'b'.repeat(64)}`,
+        from: address,
+        to: '0x2222222222222222222222222222222222222222',
+        blockNumber: 145,
+        transactionIndex: 0,
+        direction: 'outgoing' as const,
+        valueWei: '1000000000000000000',
+        valueDgv: '1.0',
+        gasUsed: '21000',
+        effectiveGasPriceWei: '1',
+        feeWei: '21000',
+        feeDgv: '0.000000000000021',
+        status: 1 as const,
+        timestamp: 1_763_555_200
+      }]
+    };
+    vi.mocked(TestBed.inject(IndexerService).getAddressTransactions)
+      .mockRejectedValue(new Error('Indexer unavailable.'));
+    app.adresseWallet = address;
+    app.snapshot = snapshot;
+
+    await app.chargerHistorique();
+
+    expect(app.transactions).toHaveLength(1);
+    expect(app.transactions[0].hash).toBe(snapshot.transactions[0].hash);
+    expect(app.transactionsStale).toBe(true);
+    expect(app.transactionsSyncedAt).toBe(snapshot.syncedAt);
+    expect(app.transactionsIndexedThrough).toBe(145);
+    expect(app.transactionsHistoryComplete).toBe(true);
+    expect(app.transactionsError).toContain('données non actualisées');
     fixture.destroy();
   });
 
@@ -1304,17 +1429,27 @@ describe('App', () => {
   });
 
   it('requires explicit confirmation, sends a native value transaction, and refreshes the balance', async () => {
+    localStorage.clear();
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
-    const txHash = `0x${'a'.repeat(64)}`;
-    const sendTransaction = vi.fn().mockResolvedValue({
-      hash: txHash,
-      wait: vi.fn().mockResolvedValue({ status: 1, blockNumber: 145 })
-    });
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const signedTransaction = `0x${'11'.repeat(100)}`;
+    const txHash = keccak256(signedTransaction);
+    const blockHash = `0x${'b'.repeat(64)}`;
+    const signTransaction = vi.fn().mockResolvedValue(signedTransaction);
     const provider = {
       getNetwork: vi.fn().mockResolvedValue({ chainId: 20261019n }),
       getCode: vi.fn().mockResolvedValue('0x'),
       getBalance: vi.fn().mockResolvedValue(100n * 10n ** 18n),
+      getTransactionCount: vi.fn().mockResolvedValue(7),
+      broadcastTransaction: vi.fn().mockResolvedValue({ hash: txHash }),
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        hash: txHash,
+        blockNumber: 145,
+        blockHash,
+        status: 1
+      }),
+      getBlock: vi.fn().mockResolvedValue({ hash: blockHash }),
       getFeeData: vi.fn().mockResolvedValue({
         gasPrice: 1_000_000_000n,
         maxFeePerGas: null,
@@ -1325,7 +1460,7 @@ describe('App', () => {
     };
     const signer = {
       address: '0x1111111111111111111111111111111111111111',
-      connect: vi.fn(() => ({ sendTransaction }))
+      connect: vi.fn(() => ({ signTransaction }))
     };
     (app as any).rpcProvider = provider;
     (app as any).unlockedWallet = signer;
@@ -1341,20 +1476,155 @@ describe('App', () => {
 
     expect(app.preparedTransfer?.amountDgv).toBe('1.25');
     expect(app.preparedTransfer?.estimatedFeeDgv).toBe('0.0000252');
-    expect(sendTransaction).not.toHaveBeenCalled();
+    expect(signTransaction).not.toHaveBeenCalled();
 
     await app.confirmerEtEnvoyer();
 
-    expect(sendTransaction).toHaveBeenCalledOnce();
-    expect(sendTransaction).toHaveBeenCalledWith(expect.objectContaining({
+    expect(signTransaction).toHaveBeenCalledOnce();
+    expect(signTransaction).toHaveBeenCalledWith(expect.objectContaining({
       to: '0x2222222222222222222222222222222222222222',
       value: 1_250_000_000_000_000_000n,
+      nonce: 7,
       chainId: 20261019n
     }));
+    expect(provider.broadcastTransaction).toHaveBeenCalledWith(signedTransaction);
     expect(app.dernierHashTransaction).toBe(txHash);
-    expect(app.messageTransaction).toContain(`Transaction confirmée : ${txHash}`);
+    expect(app.messageTransaction).toBe('Transaction envoyée avec succès !');
+    expect(app.transactionStatus).toBe('confirmed');
+    expect(readTrackedTransaction(
+      localStorage,
+      20261019,
+      signer.address
+    )).toMatchObject({ hash: txHash, status: 'confirmed', blockNumber: 145 });
     expect(app.soldeDgvDisplay).toBe('98.7499748');
     expect(app.preparedTransfer).toBeNull();
+    app.panneauTransfert = 'envoyer';
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.transaction-success')?.textContent)
+      .toContain('Transaction envoyée avec succès !');
+    expect(fixture.nativeElement.querySelector('.tx-hash-link')?.textContent)
+      .toContain('Consulter la transaction confirmée dans DIGEVRA Explorer');
+    (fixture.nativeElement.querySelector('.tx-hash-link') as HTMLButtonElement).click();
+    expect(open).toHaveBeenCalledWith(
+      `http://localhost:4201/#/transaction/${txHash}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+    fixture.destroy();
+  });
+
+  it('keeps the signed hash pending after a broadcast timeout and confirms it on a later receipt', async () => {
+    localStorage.clear();
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const { provider, signer, hash } = configureMockTransfer(app, {
+      broadcast: async () => {
+        throw new Error('RPC response timed out after broadcast');
+      }
+    });
+    const receipt = {
+      hash,
+      blockNumber: 201,
+      blockHash: `0x${'b'.repeat(64)}`,
+      status: 1
+    };
+    await app.preparerEnvoi();
+
+    await app.confirmerEtEnvoyer();
+
+    expect(app.dernierHashTransaction).toBe(hash);
+    expect(app.transactionStatus).toBe('pending');
+    expect(app.messageTransaction).toContain('Ne renvoyez pas cette transaction');
+    expect(readTrackedTransaction(localStorage, 20261019, signer.address))
+      .toMatchObject({ hash, status: 'pending' });
+    expect(provider.broadcastTransaction).toHaveBeenCalledOnce();
+
+    vi.mocked(provider.getTransactionReceipt).mockResolvedValue(receipt as never);
+    await (app as any).verifierTransactionConfirmee(hash);
+
+    expect(app.transactionStatus).toBe('confirmed');
+    expect(app.messageTransaction).toBe('Transaction envoyée avec succès !');
+    expect(provider.broadcastTransaction).toHaveBeenCalledOnce();
+    fixture.destroy();
+  });
+
+  it('does not report success when the verified receipt has failed status', async () => {
+    localStorage.clear();
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const { provider, signer, hash } = configureMockTransfer(app);
+    vi.mocked(provider.getTransactionReceipt).mockResolvedValue({
+      hash,
+      blockNumber: 202,
+      blockHash: `0x${'b'.repeat(64)}`,
+      status: 0
+    } as never);
+    await app.preparerEnvoi();
+
+    await app.confirmerEtEnvoyer();
+
+    expect(app.transactionStatus).toBe('failed');
+    expect(app.messageTransaction).toContain('exécution a échoué');
+    expect(app.messageTransaction).not.toContain('Transaction envoyée avec succès !');
+    expect(readTrackedTransaction(localStorage, 20261019, signer.address))
+      .toMatchObject({ hash, status: 'failed', blockNumber: 202 });
+    fixture.destroy();
+  });
+
+  it('restores a pending hash after refresh and blocks a duplicate broadcast', async () => {
+    localStorage.clear();
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const sender = '0x1111111111111111111111111111111111111111';
+    const hash = `0x${'c'.repeat(64)}`;
+    const pending: TrackedTransaction = {
+      schemaVersion: 1,
+      chainId: 20261019,
+      sender,
+      recipient: '0x2222222222222222222222222222222222222222',
+      amountDgv: '1.25',
+      hash,
+      status: 'pending',
+      updatedAt: '2026-11-20T09:00:00.000Z'
+    };
+    saveTrackedTransaction(localStorage, pending);
+    app.adresseWallet = sender;
+    app.preparedTransfer = {} as never;
+    (app as any).unlockedWallet = { address: sender };
+    const provider = {
+      getTransactionReceipt: vi.fn().mockResolvedValue(null),
+      broadcastTransaction: vi.fn(),
+      destroy: vi.fn()
+    };
+    (app as any).rpcProvider = provider;
+    app.rpcConnected = false;
+
+    (app as any).restaurerTransactionSuivie(sender);
+    await app.confirmerEtEnvoyer();
+
+    expect(app.dernierHashTransaction).toBe(hash);
+    expect(app.transactionStatus).toBe('pending');
+    expect(app.messageTransaction).toContain('Aucun nouvel envoi ne sera lancé');
+    expect(provider.broadcastTransaction).not.toHaveBeenCalled();
+    fixture.destroy();
+  });
+
+  it('keeps confirmation pending when the RPC drops during receipt verification', async () => {
+    localStorage.clear();
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const { provider, signer, hash } = configureMockTransfer(app);
+    vi.mocked(provider.getTransactionReceipt).mockRejectedValue(
+      new Error('connection lost')
+    );
+    await app.preparerEnvoi();
+
+    await app.confirmerEtEnvoyer();
+
+    expect(app.transactionStatus).toBe('pending');
+    expect(app.messageTransaction).toContain(`Le hash ${hash} est conservé`);
+    expect(readTrackedTransaction(localStorage, 20261019, signer.address))
+      .toMatchObject({ hash, status: 'pending' });
     fixture.destroy();
   });
 

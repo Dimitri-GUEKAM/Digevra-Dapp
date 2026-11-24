@@ -69,6 +69,28 @@ recovery phrases in the snapshot. Sender and recipient addresses are public
 blockchain data but remain identifying public activity; review them before
 publishing.
 
+### Read-only multichain portfolio
+
+The authenticated dashboard includes separate Bitcoin Mainnet, Ethereum
+Mainnet, Solana Mainnet-beta, BNB Smart Chain Mainnet, and DIGEVRA balance
+adapters. Ethereum, BNB, and DIGEVRA use the active EVM wallet address;
+Bitcoin and Solana require their own public watch address, saved separately in
+browser storage. Those addresses are public and are not private keys.
+
+Balances are fetched on demand from the configured public APIs/RPCs. A network
+error is shown as unavailable/error, never as a zero balance; zero is displayed
+only after a successful response. Public Ethereum, BNB, Solana, and Bitcoin
+endpoints can enforce rate limits or change availability and should be replaced
+with trusted providers for production use. DIGEVRA continues to use its
+existing runtime RPC configuration and Chain ID `20261019`.
+
+The shared adapters expose read-only ERC-20/BEP-20 and SPL token balance calls,
+but no token contract or mint addresses are configured by default. Consequently
+the asset list does not invent token balances or prices. Bitcoin token
+protocols are not included. The multichain panel does not sign, send, bridge,
+or derive keys for any network; the existing DIGEVRA wallet and encrypted vault
+remain unchanged.
+
 To start a new temporary Cloudflare Quick Tunnel after verifying the local
 services, run:
 
@@ -108,6 +130,12 @@ ng serve
 ```
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+
+During local development, the Wallet and Explorer use their same-origin proxies
+for the local Besu RPC and indexer, even when `public/digevra-config.js` contains
+production endpoints. This keeps local testing independent of the temporary
+public tunnel. The production Pages build continues to require explicit public
+HTTPS endpoints in live mode.
 
 ## Code scaffolding
 
@@ -150,6 +178,22 @@ récapitulatif, l’interface vérifie le Chain ID, l’absence de code de contr
 l’expéditeur, le solde réel et les frais estimés. « Confirmer et envoyer » est
 une étape distincte; après signature, le Wallet attend un reçu réussi et
 actualise le solde.
+
+Le hash de la transaction signée est calculé localement et enregistré avec le
+Chain ID et l’adresse expéditrice avant la diffusion; le payload signé et la clé
+privée ne sont jamais persistés. Un hash en attente est restauré après
+actualisation de la page et bloque un nouvel envoi depuis ce portefeuille tant
+que son statut n’est pas résolu. Un timeout de diffusion ou une coupure RPC
+conserve l’état « en attente » : il n’est affiché ni comme échec ni comme succès.
+Le reçu et son bloc canonique sont revérifiés lors des actualisations réseau.
+Le succès n’est affiché qu’après vérification d’un reçu réussi et d’un hash de
+bloc correspondant; le hash permet ensuite d’ouvrir DIGEVRA Explorer.
+
+Si l’indexeur est indisponible, l’activité peut afficher un snapshot valide
+uniquement pour l’adresse sélectionnée, avec sa date de synchronisation et son
+bloc clairement signalés comme anciens. Sans snapshot correspondant, l’interface
+signale l’indisponibilité au lieu de présenter une liste vide comme un historique
+à jour.
 
 Une adresse Smart Contract Wallet, une session DApp et un actif ERC-20 ne sont
 pas utilisés pour ce transfert natif. Leur méthode d’exécution ou leur contrat

@@ -4,6 +4,7 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve --configuration development",
+    "start:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-digevra-local.ps1",
     "start:explorer": "node explorer/server.mjs",
     "build": "ng build",
     "build:pages": "ng build --configuration production --base-href /Digevra-Dapp/ && node scripts/prepare-pages.mjs",
@@ -22,6 +23,9 @@
     "@angular/forms": "^22.2.0",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.0",
+    "@noble/curves": "^2.4.0",
+    "@scure/base": "^2.4.0",
+    "ed25519-hd-key": "^2.0.0",
     "ethers": "^6.17.0",
     "qrcode": "^1.5.4",
     "rxjs": "~7.8.0",

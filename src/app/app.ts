@@ -7,9 +7,13 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { MultiChainAssetsComponent } from './multichain/components/multichain-assets.component';
+import { MultiChainWalletService } from './multichain/services/multichain-wallet.service';
+import { MultiChainWalletAccount } from './multichain/models/network';
 import {
   formatEther,
   getAddress,
+  keccak256,
   parseEther,
   JsonRpcProvider,
   Wallet,
@@ -47,6 +51,12 @@ import {
   WALLET_ACCOUNTS_STORAGE_KEY,
   writeStoredWalletAccounts
 } from './wallet-store';
+import {
+  readTrackedTransaction,
+  saveTrackedTransaction,
+  TrackedTransaction,
+  TrackedTransactionStatus
+} from './transaction-tracking';
 
 function formatBalanceAmount(amount: string): string {
   const [whole, fraction = ''] = amount.split('.');
@@ -126,7 +136,8 @@ interface ManagedWallet extends StoredWalletAccount {
   standalone: true,
   imports: [
     CommonModule,
-    FormsModule
+    FormsModule,
+    MultiChainAssetsComponent
   ],
   templateUrl: './app.html'
 })
@@ -150,6 +161,8 @@ export class App implements OnInit, OnDestroy {
   transactionsState: 'idle' | 'starting' | 'syncing' | 'ready' | 'degraded' = 'idle';
   transactionsHistoryComplete = false;
   transactionsIndexedThrough: number | null = null;
+  transactionsStale = false;
+  transactionsSyncedAt: string | null = null;
   transactionsTotal = 0;
   transactionsPage = 0;
   readonly transactionsPageSize = 10;
@@ -268,6 +281,7 @@ export class App implements OnInit, OnDestroy {
   vueActive: 'wallet' | 'activite' | 'parametres' = 'wallet';
 
   walletConnecte = false;
+  consultationMode = false;
   authMode: 'welcome' | 'create' | 'import' | 'unlock' = 'welcome';
   vaultExists = false;
   authPassword = '';
@@ -283,6 +297,7 @@ export class App implements OnInit, OnDestroy {
   walletManagerError = '';
   walletManagerMessage = '';
   walletAccounts: ManagedWallet[] = [];
+  multichainAccounts: MultiChainWalletAccount[] = [];
   selectedWalletId = '';
   walletNameInput = '';
   walletAddressInput = '';
@@ -327,10 +342,14 @@ export class App implements OnInit, OnDestroy {
   messageNavigation = '';
   transactionEnCours = false;
   dernierHashTransaction = '';
+  transactionStatus: 'idle' | 'signing' | 'pending' | 'confirmed' | 'failed' | 'unknown' = 'idle';
 
   private intervalId: ReturnType<typeof setInterval>;
+  private transactionVerificationInProgress = false;
   private navigationMessageTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private signatureRequestTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private lastSigningActivityAt = 0;
+  private readonly signingInactivityTimeoutMs = 30 * 60 * 1000;
   private walletWindow: Window | null = null;
   private demandeTransactionId = '';
   demandeAutorisationSessionId = '';
@@ -340,11 +359,16 @@ export class App implements OnInit, OnDestroy {
     private cdr: ChangeDetectorRef,
     private networkService: NetworkService,
     private indexerService: IndexerService,
-    private snapshotService: SnapshotService
+    private snapshotService: SnapshotService,
+    private multichainWalletService: MultiChainWalletService
   ) {
     this.intervalId = setInterval(() => {
       void this.actualiserDonneesReseau();
+      this.verrouillerApresInactiviteSignature();
     }, 15000);
+    window.addEventListener('pointerdown', this.marquerActiviteSignature);
+    window.addEventListener('keydown', this.marquerActiviteSignature);
+    window.addEventListener('touchstart', this.marquerActiviteSignature, { passive: true });
   }
 
   ngOnInit() {
@@ -380,10 +404,33 @@ export class App implements OnInit, OnDestroy {
       this.adresseWallet = adresseSauvegardee;
       void this.restaurerSnapshot(adresseSauvegardee);
       this.walletConnecte = false;
+      this.consultationMode = true;
       this.sessionAutorisee = false;
       this.sessionWallet = null;
       this.sessionAddress = '';
-      this.chargerWallet();
+      this.vaultUnlocked = false;
+      this.consultationMode = true;
+      this.authMode = 'unlock';
+      try {
+        const accounts = readStoredWalletAccounts(localStorage);
+        this.walletAccounts = accounts.map((account) => ({
+          ...account,
+          balanceDgv: null,
+          balanceLoading: false
+        }));
+        const selectedId = localStorage.getItem(SELECTED_WALLET_STORAGE_KEY);
+        const selected = accounts.find((account) => account.id === selectedId)
+          ?? accounts.find((account) => account.address.toLowerCase() === adresseSauvegardee.toLowerCase())
+          ?? accounts[0];
+        if (selected) {
+          this.selectedWalletId = selected.id;
+          this.adresseWallet = selected.address;
+        }
+      } catch {
+        this.walletAccounts = [];
+        this.selectedWalletId = '';
+      }
+      void this.chargerWallet();
     }
   }
 
@@ -463,6 +510,8 @@ export class App implements OnInit, OnDestroy {
     this.transactionsState = 'ready';
     this.transactionsHistoryComplete = snapshot.historyComplete;
     this.transactionsIndexedThrough = snapshot.lastBlockNumber;
+    this.transactionsStale = true;
+    this.transactionsSyncedAt = snapshot.syncedAt;
     this.transactionsError = '';
   }
 
@@ -819,6 +868,7 @@ export class App implements OnInit, OnDestroy {
       this.walletAccounts = managedAccounts;
       this.selectedWalletId = selected.id;
       this.unlockedWallet = signers.get(selected.id) ?? null;
+      this.mettreAJourComptesMultiChain();
       this.vaultUnlocked = true;
       this.authPassword = '';
       this.authError = '';
@@ -827,6 +877,8 @@ export class App implements OnInit, OnDestroy {
       this.snapshot = null;
       this.snapshotIsStale = true;
       this.walletConnecte = true;
+      this.consultationMode = false;
+      this.lastSigningActivityAt = Date.now();
       // La signature via session Smart Wallet externe n'est PAS autorisée ici.
       this.sessionAutorisee = false;
       this.sessionWallet = null;
@@ -848,6 +900,7 @@ export class App implements OnInit, OnDestroy {
         : 'Mot de passe incorrect ou coffre illisible. Le coffre principal n’a pas été modifié.';
       this.walletSigners.clear();
       this.walletAccounts = [];
+      this.multichainAccounts = [];
       this.selectedWalletId = '';
       this.unlockedWallet = null;
       this.vaultUnlocked = false;
@@ -906,10 +959,12 @@ export class App implements OnInit, OnDestroy {
 
     this.selectedWalletId = account.id;
     this.adresseWallet = account.address;
+    this.mettreAJourComptesMultiChain();
     this.snapshot = null;
     this.snapshotIsStale = true;
     this.snapshotWarning = '';
     this.unlockedWallet = this.walletSigners.get(account.id) ?? null;
+    this.mettreAJourComptesMultiChain();
     this.sessionWallet = null;
     this.sessionAddress = '';
     this.sessionAutorisee = false;
@@ -995,6 +1050,33 @@ export class App implements OnInit, OnDestroy {
     this.cdr.detectChanges();
   }
 
+  async selectionnerPortefeuilleDepuisMultiChain(accountId: string): Promise<void> {
+    await this.selectionnerPortefeuille(accountId);
+  }
+
+  private mettreAJourComptesMultiChain(): void {
+    const accounts: MultiChainWalletAccount[] = [];
+    for (const walletAccount of this.walletAccounts) {
+      if (walletAccount.kind === 'watch') {
+        accounts.push(...this.multichainWalletService.createWatchAccount(
+          walletAccount.id,
+          walletAccount.name,
+          walletAccount.address
+        ));
+        continue;
+      }
+
+      const signer = this.walletSigners.get(walletAccount.id);
+      if (!signer) continue;
+      accounts.push(...this.multichainWalletService.deriveAccounts(
+        walletAccount.id,
+        walletAccount.name,
+        signer
+      ));
+    }
+    this.multichainAccounts = accounts;
+  }
+
   async copierAdressePortefeuille(account: ManagedWallet): Promise<void> {
     try {
       await navigator.clipboard.writeText(account.address);
@@ -1032,6 +1114,7 @@ export class App implements OnInit, OnDestroy {
     );
     if (!this.persistManagedWallets(updated)) return;
     this.walletAccounts = updated;
+    this.mettreAJourComptesMultiChain();
     this.annulerRenommagePortefeuille();
     this.walletManagerError = '';
   }
@@ -1226,6 +1309,7 @@ export class App implements OnInit, OnDestroy {
     if (!this.persistManagedWallets(updated)) return;
 
     this.walletAccounts = updated;
+    this.mettreAJourComptesMultiChain();
     for (const addition of additions) {
       if (addition.signer) {
         this.walletSigners.set(addition.account.id, addition.signer);
@@ -1280,6 +1364,7 @@ export class App implements OnInit, OnDestroy {
   verrouiller() {
     this.unlockedWallet = null;
     this.walletSigners.clear();
+    this.multichainAccounts = [];
     this.walletBalanceRequestId += 1;
     this.walletAccounts = [];
     this.selectedWalletId = '';
@@ -1311,11 +1396,31 @@ export class App implements OnInit, OnDestroy {
     this.choisirAuth('unlock');
   }
 
+  private marquerActiviteSignature = (): void => {
+    if (this.vaultUnlocked) {
+      this.lastSigningActivityAt = Date.now();
+    }
+  };
+
+  private verrouillerApresInactiviteSignature(): void {
+    if (
+      !this.vaultUnlocked ||
+      this.lastSigningActivityAt === 0 ||
+      Date.now() - this.lastSigningActivityAt < this.signingInactivityTimeoutMs
+    ) {
+      return;
+    }
+    this.verrouiller();
+  }
+
   ngOnDestroy() {
     window.removeEventListener(
       'message',
       this.recevoirMessageWallet
     );
+    window.removeEventListener('pointerdown', this.marquerActiviteSignature);
+    window.removeEventListener('keydown', this.marquerActiviteSignature);
+    window.removeEventListener('touchstart', this.marquerActiviteSignature);
 
     clearInterval(this.intervalId);
     if (this.navigationMessageTimeoutId) {
@@ -1325,6 +1430,7 @@ export class App implements OnInit, OnDestroy {
     this.sessionWallet = null;
     this.sessionAddress = '';
     this.unlockedWallet = null;
+    this.multichainAccounts = [];
     this.authPassword = '';
     this.authConfirm = '';
     this.authPhrase = '';
@@ -1428,10 +1534,19 @@ export class App implements OnInit, OnDestroy {
         return;
       }
 
-      this.dernierHashTransaction = data.hash;
-      this.messageTransaction =
-        `Transaction envoyée : ${data.hash}`;
       this.arreterTimeoutSignature();
+      try {
+        this.enregistrerTransactionSuivie(data.hash, 'pending');
+        this.messageTransaction =
+          `Transaction diffusée. Confirmation en attente pour ${data.hash}.`;
+        void this.verifierTransactionConfirmee(data.hash);
+      } catch (error) {
+        this.dernierHashTransaction = data.hash;
+        this.transactionStatus = 'unknown';
+        this.messageTransaction =
+          `Le hash ${data.hash} est conservé en mémoire, mais son suivi local n’a pas pu être enregistré. ` +
+          (error instanceof Error ? error.message : 'Stockage indisponible.');
+      }
     } else if (data.type === 'DIGEVRA_TRANSACTION_CONFIRMED') {
       if (
         typeof data.hash !== 'string' ||
@@ -1450,7 +1565,10 @@ export class App implements OnInit, OnDestroy {
       this.transactionEnCours = false;
       this.demandeTransactionId = '';
       this.arreterTimeoutSignature();
-      this.messageTransaction = 'Échec de la transaction.';
+      this.transactionStatus = this.dernierHashTransaction ? 'pending' : 'unknown';
+      this.messageTransaction = this.dernierHashTransaction
+        ? `Le Wallet a signalé une erreur, mais le hash ${this.dernierHashTransaction} est conservé et doit être vérifié sur la chaîne.`
+        : 'Le Wallet a signalé une erreur; aucun hash ne permet de vérifier si une transaction a été diffusée.';
     } else {
       return;
     }
@@ -1574,6 +1692,7 @@ export class App implements OnInit, OnDestroy {
     this.adresseWallet = '';
     this.unlockedWallet = null;
     this.walletSigners.clear();
+    this.multichainAccounts = [];
     this.walletBalanceRequestId += 1;
     this.walletAccounts = [];
     this.selectedWalletId = '';
@@ -1639,7 +1758,7 @@ export class App implements OnInit, OnDestroy {
 
     this.panneauTransfert = 'envoyer';
     this.messageTransaction = '';
-    this.dernierHashTransaction = '';
+    this.restaurerTransactionSuivie(this.adresseWallet);
     this.preparedTransfer = null;
     if (this.transactionUnavailableReason) {
       this.messageTransaction = this.transactionUnavailableReason;
@@ -1674,7 +1793,13 @@ export class App implements OnInit, OnDestroy {
     if (this.transactionEnCours) {
       return;
     }
+    if (this.transactionStatus === 'pending') {
+      this.messageTransaction =
+        `La transaction ${this.dernierHashTransaction} est encore en attente. Aucun nouvel envoi ne sera préparé.`;
+      return;
+    }
 
+    this.transactionStatus = 'idle';
     this.preparedTransfer = null;
     if (this.modeDemonstration) {
       this.messageTransaction =
@@ -1850,10 +1975,33 @@ export class App implements OnInit, OnDestroy {
       return;
     }
 
+    if (this.transactionEnCours) return;
+
     const prepared = this.preparedTransfer;
     const signer = this.unlockedWallet;
     const provider = this.rpcProvider;
-    if (this.transactionEnCours || !prepared || !signer || !provider) {
+    if (!prepared || !signer || !provider || !isAddress(this.adresseWallet)) {
+      return;
+    }
+
+    let existingTransaction: TrackedTransaction | null;
+    try {
+      existingTransaction = readTrackedTransaction(
+        localStorage,
+        this.activeNetwork.chainId,
+        this.adresseWallet
+      );
+    } catch (error) {
+      this.transactionStatus = 'unknown';
+      this.messageTransaction = error instanceof Error
+        ? error.message
+        : 'Le statut local d’une transaction ne peut pas être vérifié.';
+      return;
+    }
+    if (existingTransaction?.status === 'pending') {
+      this.restaurerTransactionSuivie(this.adresseWallet);
+      this.messageTransaction =
+        `Une transaction (${existingTransaction.hash}) est toujours en attente de vérification. Aucun nouvel envoi ne sera lancé.`;
       return;
     }
 
@@ -1867,7 +2015,9 @@ export class App implements OnInit, OnDestroy {
     }
 
     this.transactionEnCours = true;
+    this.transactionStatus = 'signing';
     this.messageTransaction = 'Vérification des frais et de l’état du réseau avant signature…';
+    let broadcastStarted = false;
     try {
       const current = await this.creerPreparationTransfert();
       if (
@@ -1896,6 +2046,7 @@ export class App implements OnInit, OnDestroy {
         to: current.recipient,
         value: current.amount,
         gasLimit: current.gasLimit,
+        nonce: await provider.getTransactionCount(current.sender, 'pending'),
         chainId: BigInt(current.chainId),
         ...(current.isEip1559
           ? {
@@ -1905,41 +2056,145 @@ export class App implements OnInit, OnDestroy {
           : { gasPrice: current.feePerGas })
       };
       const connectedSigner = signer.connect(provider);
-      const response = await connectedSigner.sendTransaction(transactionRequest);
-      this.dernierHashTransaction = response.hash;
-      this.preparedTransfer = null;
-      this.messageTransaction = `Transaction diffusée : ${response.hash}. En attente de confirmation…`;
-
-      const receipt = await response.wait(1);
-      if (!receipt || receipt.status !== 1) {
-        throw new Error('La transaction n’a pas été confirmée avec succès.');
+      const signedTransaction = await connectedSigner.signTransaction(transactionRequest);
+      const signedHash = keccak256(signedTransaction);
+      this.enregistrerTransactionSuivie(signedHash, 'pending', current);
+      broadcastStarted = true;
+      this.transactionStatus = 'pending';
+      const response = await provider.broadcastTransaction(signedTransaction);
+      if (response.hash.toLowerCase() !== signedHash.toLowerCase()) {
+        throw new Error('Le hash retourné par le RPC ne correspond pas à la transaction signée.');
       }
 
-      this.messageTransaction = `Transaction confirmée : ${response.hash}`;
-      this.adresseDestinataire = '';
-      this.montantEnvoi = 0;
       this.preparedTransfer = null;
-      await this.chargerWallet();
+      this.messageTransaction =
+        `Transaction diffusée. Confirmation en attente pour ${signedHash}.`;
+      await this.verifierTransactionConfirmee(signedHash);
     } catch (error) {
       const errorCode = (error as { code?: string }).code;
-      this.messageTransaction = errorCode === 'ACTION_REJECTED'
-        ? 'Signature refusée. Aucune transaction n’a été diffusée.'
-        : error instanceof Error
-          ? error.message
-          : 'Échec de la vérification ou de l’envoi de la transaction.';
+      if (broadcastStarted && this.dernierHashTransaction) {
+        this.transactionStatus = 'pending';
+        this.messageTransaction =
+          `La réponse du RPC a été interrompue après la diffusion. Le hash ${this.dernierHashTransaction} est conservé et son reçu sera revérifié; ne renvoyez pas cette transaction.`;
+        await this.verifierTransactionConfirmee(this.dernierHashTransaction);
+      } else {
+        this.transactionStatus = 'idle';
+        this.messageTransaction = errorCode === 'ACTION_REJECTED'
+          ? 'Signature refusée. Aucune transaction n’a été diffusée.'
+          : error instanceof Error
+            ? error.message
+            : 'Échec de la vérification ou de la signature. Aucune diffusion n’a été tentée.';
+      }
     } finally {
       this.transactionEnCours = false;
       this.cdr.detectChanges();
     }
   }
 
+  private enregistrerTransactionSuivie(
+    hash: string,
+    status: TrackedTransactionStatus,
+    transfer?: PreparedNativeTransfer,
+    blockNumber?: number
+  ): void {
+    const sender = transfer?.sender ?? this.adresseWallet;
+    const chainId = transfer?.chainId ?? this.activeNetwork.chainId;
+    const existing = readTrackedTransaction(localStorage, chainId, sender);
+    if (existing?.status === 'pending' && existing.hash !== hash.toLowerCase()) {
+      throw new Error(
+        `La transaction ${existing.hash} est encore en attente; elle doit être résolue avant tout nouvel envoi.`
+      );
+    }
+    const record: TrackedTransaction = {
+      schemaVersion: 1,
+      chainId,
+      sender: getAddress(sender),
+      recipient: transfer?.recipient ?? existing?.recipient ?? null,
+      amountDgv: transfer?.amountDgv ?? existing?.amountDgv ?? null,
+      hash: hash.toLowerCase(),
+      status,
+      updatedAt: new Date().toISOString(),
+      ...(blockNumber !== undefined ? { blockNumber } : {})
+    };
+    saveTrackedTransaction(localStorage, record);
+    this.dernierHashTransaction = record.hash;
+    this.transactionStatus = status;
+  }
+
+  private restaurerTransactionSuivie(address: string): void {
+    if (!isAddress(address)) return;
+    try {
+      const record = readTrackedTransaction(
+        localStorage,
+        this.activeNetwork.chainId,
+        address
+      );
+      if (!record) return;
+      this.dernierHashTransaction = record.hash;
+      this.transactionStatus = record.status;
+      if (record.status === 'confirmed') {
+        this.messageTransaction = 'Transaction envoyée avec succès !';
+      } else if (record.status === 'failed') {
+        this.messageTransaction =
+          `La transaction ${record.hash} a été incluse mais exécutée en échec.`;
+      } else {
+        this.messageTransaction =
+          `Transaction ${record.hash} en attente de confirmation vérifiée.`;
+        void this.verifierTransactionConfirmee(record.hash);
+      }
+    } catch (error) {
+      this.transactionStatus = 'unknown';
+      this.messageTransaction = error instanceof Error
+        ? error.message
+        : 'Le suivi local de la transaction est illisible.';
+    }
+  }
+
   private async verifierTransactionConfirmee(hash: string): Promise<void> {
+    if (this.transactionVerificationInProgress) return;
+    this.transactionVerificationInProgress = true;
+    this.transactionStatus = 'pending';
+    this.dernierHashTransaction = hash;
+
+    let sender = this.adresseWallet;
+    let record: TrackedTransaction | null = null;
+    try {
+      if (!isAddress(sender) || !/^0x[a-fA-F0-9]{64}$/.test(hash)) {
+        throw new Error('Adresse ou hash invalide pour vérifier la transaction.');
+      }
+      record = readTrackedTransaction(
+        localStorage,
+        this.activeNetwork.chainId,
+        sender
+      );
+      if (!record) {
+        this.enregistrerTransactionSuivie(hash, 'pending');
+        record = readTrackedTransaction(
+          localStorage,
+          this.activeNetwork.chainId,
+          sender
+        );
+      }
+      if (!record || record.hash !== hash.toLowerCase()) {
+        throw new Error('Le hash ne correspond pas à la transaction suivie pour ce portefeuille.');
+      }
+    } catch (error) {
+      this.transactionStatus = 'unknown';
+      this.messageTransaction = error instanceof Error
+        ? error.message
+        : 'Le statut local de la transaction ne peut pas être vérifié.';
+      this.transactionEnCours = false;
+      this.transactionVerificationInProgress = false;
+      this.cdr.detectChanges();
+      return;
+    }
+
     const provider = this.rpcProvider;
     if (!provider || !this.rpcConnected) {
       this.messageTransaction =
-        'Le hash a été reçu, mais le statut ne peut pas être vérifié sans RPC.';
+        `Le hash ${hash} est conservé; la confirmation reste en attente car le RPC est indisponible.`;
       this.transactionEnCours = false;
-      this.demandeTransactionId = '';
+      this.transactionVerificationInProgress = false;
       this.cdr.detectChanges();
       return;
     }
@@ -1949,27 +2204,59 @@ export class App implements OnInit, OnDestroy {
         provider.getNetwork(),
         provider.getTransactionReceipt(hash)
       ]);
+      if (network.chainId !== BigInt(record.chainId)) {
+        throw new Error('Le RPC connecté ne correspond pas au réseau de la transaction.');
+      }
+      if (!receipt) {
+        this.transactionStatus = 'pending';
+        this.messageTransaction =
+          `Transaction ${hash} diffusée; aucun reçu n’est encore disponible. Le suivi reprendra automatiquement. Ne renvoyez pas cette transaction.`;
+        return;
+      }
       if (
-        network.chainId !== BigInt(this.activeNetwork.chainId) ||
-        !receipt ||
-        receipt.status !== 1
+        receipt.hash?.toLowerCase() !== hash.toLowerCase() ||
+        !Number.isSafeInteger(receipt.blockNumber) ||
+        receipt.blockNumber < 0 ||
+        !receipt.blockHash
       ) {
-        throw new Error('La transaction n’a pas été confirmée sur le réseau actif.');
+        throw new Error('Le reçu RPC ne correspond pas au hash ou ne contient pas de bloc valide.');
+      }
+      const canonicalBlock = await provider.getBlock(receipt.blockNumber);
+      if (canonicalBlock?.hash?.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+        this.transactionStatus = 'pending';
+        this.messageTransaction =
+          `Le bloc de la transaction ${hash} n’est pas encore vérifiable comme canonique. Le reçu sera revérifié.`;
+        return;
       }
 
-      this.dernierHashTransaction = hash;
-      this.messageTransaction = `Transaction confirmée : ${hash}`;
+      if (receipt.status === 0) {
+        this.enregistrerTransactionSuivie(hash, 'failed', undefined, receipt.blockNumber);
+        this.messageTransaction =
+          `La transaction ${hash} a été confirmée sur la chaîne, mais son exécution a échoué.`;
+        return;
+      }
+      if (receipt.status !== 1) {
+        throw new Error('Le reçu ne contient pas un statut d’exécution vérifiable.');
+      }
+
+      this.enregistrerTransactionSuivie(hash, 'confirmed', undefined, receipt.blockNumber);
+      this.messageTransaction = 'Transaction envoyée avec succès !';
       this.adresseDestinataire = '';
       this.montantEnvoi = 0;
-      this.chargerWallet();
+      this.preparedTransfer = null;
+      await this.chargerWallet();
     } catch (error) {
-      this.messageTransaction = error instanceof Error
-        ? error.message
-        : 'Le statut de la transaction n’a pas pu être vérifié.';
+      this.transactionStatus = 'pending';
+      this.messageTransaction =
+        `Le hash ${hash} est conservé, mais sa confirmation n’est pas vérifiable pour le moment. ` +
+        (error instanceof Error ? error.message : 'Le RPC est indisponible.');
     } finally {
       this.transactionEnCours = false;
-      this.demandeTransactionId = '';
-      this.arreterTimeoutSignature();
+      this.demandeTransactionId = this.transactionStatus === 'pending'
+        ? this.demandeTransactionId
+        : '';
+      if (this.transactionStatus !== 'pending') this.arreterTimeoutSignature();
+      this.transactionVerificationInProgress = false;
       this.cdr.detectChanges();
     }
   }
@@ -2071,6 +2358,10 @@ export class App implements OnInit, OnDestroy {
   async chargerWallet(): Promise<void> {
     if (!this.adresseWallet) {
       return;
+    }
+
+    if (this.activeNetworkKey === 'digevra-local') {
+      this.restaurerTransactionSuivie(this.adresseWallet);
     }
 
     if (!this.rpcProvider || !this.rpcConnected) {
@@ -2254,6 +2545,9 @@ export class App implements OnInit, OnDestroy {
     }
 
     await this.actualiserBlocReseau();
+    if (this.transactionStatus === 'pending' && this.dernierHashTransaction) {
+      await this.verifierTransactionConfirmee(this.dernierHashTransaction);
+    }
     if (this.rpcConnected && this.adresseWallet) {
       await this.chargerWallet();
     }
@@ -2276,6 +2570,8 @@ export class App implements OnInit, OnDestroy {
     this.transactionsState = 'idle';
     this.transactionsHistoryComplete = false;
     this.transactionsIndexedThrough = null;
+    this.transactionsStale = false;
+    this.transactionsSyncedAt = null;
     this.transactionsTotal = 0;
     this.transactionsPage = 0;
   }
@@ -2311,13 +2607,51 @@ export class App implements OnInit, OnDestroy {
       this.transactionsState = result.indexer.state;
       this.transactionsHistoryComplete = result.indexer.historyComplete;
       this.transactionsIndexedThrough = result.indexer.lastIndexedBlock;
+      this.transactionsSyncedAt = null;
+      this.transactionsStale =
+        result.indexer.state !== 'ready' ||
+        !result.indexer.historyComplete ||
+        result.indexer.lastIndexedBlock === null ||
+        result.indexer.lastIndexedBlock !== result.indexer.chainHead;
     } catch (error) {
       if (requestId === this.transactionsRequestSequence) {
-        this.transactionsError = error instanceof Error
+        const indexerError = error instanceof Error
           ? error.message
           : 'Historique indisponible.';
         this.transactionsState = 'degraded';
         this.transactionsHistoryComplete = false;
+        this.transactionsStale = true;
+
+        let cachedSnapshot = this.snapshot?.address.toLowerCase() === address.toLowerCase()
+          ? this.snapshot
+          : this.publicSnapshots.find((item) =>
+              item.address.toLowerCase() === address.toLowerCase()
+            ) ?? null;
+        try {
+          cachedSnapshot ??= this.snapshotService.readLocal(address);
+        } catch (cacheError) {
+          this.transactionsError = `${indexerError} Le cache local a aussi été refusé : ${
+            cacheError instanceof Error ? cacheError.message : 'snapshot invalide.'
+          }`;
+        }
+        if (cachedSnapshot) {
+          this.transactions = toIndexedTransactions(cachedSnapshot);
+          this.transactionsTotal = cachedSnapshot.transactions.length;
+          this.transactionsIndexedThrough = cachedSnapshot.lastBlockNumber;
+          this.transactionsSyncedAt = cachedSnapshot.syncedAt;
+          this.transactionsHistoryComplete = cachedSnapshot.historyComplete;
+          this.snapshot = cachedSnapshot;
+          this.snapshotIsStale = true;
+          this.transactionsError =
+            `${indexerError} Dernier historique vérifié du ${new Date(cachedSnapshot.syncedAt).toLocaleString('fr-FR')} (bloc ${cachedSnapshot.lastBlockNumber}); données non actualisées.`;
+        } else if (!this.transactionsError) {
+          this.transactionsError = indexerError;
+          this.transactions = [];
+          this.transactionsTotal = 0;
+          this.transactionsIndexedThrough = null;
+          this.transactionsSyncedAt = null;
+          this.transactionsHistoryComplete = false;
+        }
       }
     } finally {
       if (requestId === this.transactionsRequestSequence) {

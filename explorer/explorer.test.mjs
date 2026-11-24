@@ -100,3 +100,81 @@ test('renders block details with a working transactions link', async () => {
     }
   }
 });
+
+test('uses local Explorer proxies instead of expired public endpoints during development', async () => {
+  const dom = new JSDOM(
+    '<a id="wallet-link"></a><form id="search-form"><input id="search-input"></form><div id="global-message" hidden></div><section id="content"></section>',
+    { url: 'http://localhost:4201/#/' }
+  );
+  const previousGlobals = {
+    document: globalThis.document,
+    window: globalThis.window,
+    location: globalThis.location,
+    fetch: globalThis.fetch,
+    DIGEVRA_CONFIG: globalThis.DIGEVRA_CONFIG
+  };
+  const requestedUrls = [];
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.location = dom.window.location;
+  globalThis.DIGEVRA_CONFIG = {
+    deploymentMode: 'live',
+    chainId: 20261019,
+    rpcUrl: 'https://expired-tunnel.example.test/rpc',
+    indexerApiUrl: 'https://expired-tunnel.example.test/api',
+    walletUrl: 'https://dimitri-guekam.github.io/Digevra-Dapp/',
+    explorerUrl: 'https://dimitri-guekam.github.io/Digevra-Dapp/explorer/'
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    requestedUrls.push(String(url));
+    if (String(url) === '/rpc') {
+      const { method } = JSON.parse(options.body);
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: method === 'eth_chainId' ? '0x135289b' : '0x9fde'
+      }), { status: 200 });
+    }
+    if (String(url) === '/api/stats') {
+      return new Response(JSON.stringify({
+        chainHead: 40926,
+        indexedBlocks: 40927,
+        indexedTransactions: 14,
+        historyComplete: true,
+        state: 'ready'
+      }), { status: 200 });
+    }
+    if (String(url).startsWith('/api/blocks?')) {
+      return new Response(JSON.stringify({
+        items: [],
+        pagination: { limit: 5, offset: 0, total: 0, hasMore: false }
+      }), { status: 200 });
+    }
+    if (String(url).startsWith('/api/transactions?')) {
+      return new Response(JSON.stringify({
+        items: [],
+        pagination: { limit: 5, offset: 0, total: 0, hasMore: false }
+      }), { status: 200 });
+    }
+    throw new Error(`Unexpected local Explorer request: ${String(url)}`);
+  };
+
+  try {
+    await import('./explorer.js?local-proxy-priority-regression');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(new Set(requestedUrls), new Set([
+      '/api/stats',
+      '/api/blocks?limit=5&offset=0',
+      '/api/transactions?limit=5&offset=0',
+      '/rpc'
+    ]));
+    assert.match(document.querySelector('#content').textContent, /RPC vérifié/);
+  } finally {
+    dom.window.close();
+    for (const [name, value] of Object.entries(previousGlobals)) {
+      if (value === undefined) delete globalThis[name];
+      else globalThis[name] = value;
+    }
+  }
+});

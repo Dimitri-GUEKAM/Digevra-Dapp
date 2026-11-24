@@ -20,6 +20,9 @@ body {
 .confirm-transfer{width:100%;margin-top:15px;padding:14px;border:0;border-radius:13px;background:linear-gradient(110deg,#168cff,#623cf4);color:white;font-weight:800}
 .confirm-transfer:disabled{cursor:wait;opacity:.6}
 .transaction-message{overflow-wrap:anywhere;padding:10px 12px;border-radius:10px;background:rgba(21,117,220,.12);color:#8fc7ff}
+.transaction-message.transaction-success{border:1px solid rgba(67,205,151,.45);background:rgba(23,133,91,.16);color:#8ce5bd}
+.transaction-message.transaction-pending{border:1px solid rgba(239,185,91,.4);background:rgba(156,105,24,.14);color:#f2d18f}
+.transaction-message.transaction-failed{border:1px solid rgba(235,105,124,.4);background:rgba(160,42,63,.15);color:#ffabb7}
 .receive-qr{display:block;width:240px;height:240px;margin:25px auto;padding:12px;border-radius:18px;background:white}
 .receive-address{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;background:#071326}
 .receive-address code{flex:1;overflow-wrap:anywhere;color:#9bc8ff}

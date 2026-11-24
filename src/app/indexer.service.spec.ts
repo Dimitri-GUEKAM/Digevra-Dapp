@@ -6,6 +6,10 @@ describe('IndexerService', () => {
 
   it('uses the dev proxy locally but never invents a production indexer URL', () => {
     expect(resolveIndexerApiBaseUrl(undefined, true)).toBe('/api');
+    expect(resolveIndexerApiBaseUrl(
+      'https://expired-tunnel.example.test/api',
+      true
+    )).toBe('/api');
     expect(resolveIndexerApiBaseUrl(' https://indexer.example.test/api/ ', false))
       .toBe('https://indexer.example.test/api');
     expect(resolveIndexerApiBaseUrl(undefined, false)).toBe('');
